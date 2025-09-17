@@ -7,7 +7,6 @@ export class AuthService {
    */
   static async signUp(signUpData: SignUpData): Promise<AuthResponse> {
     try {
-      // Create auth user - profile will be created after email confirmation
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: signUpData.email,
         password: signUpData.password,
@@ -20,18 +19,27 @@ export class AuthService {
       })
 
       if (authError) {
-        const rawMessage = (typeof authError === 'object' && authError && 'message' in authError)
-          ? String((authError as unknown as Record<string, unknown>).message)
-          : ''
+        const message =
+          typeof authError === 'object' && authError && 'message' in authError
+            ? String((authError as unknown as Record<string, unknown>).message)
+            : ''
 
-        if (/user.*already.*(registered|exists)|already.*registered/i.test(rawMessage)) {
+        if (/already.*(registered|exists)/i.test(message)) {
           return {
             data: null,
             error: { message: 'An account with this email already exists. Please sign in or reset your password.' },
           }
         }
-
         return { data: null, error: authError }
+      }
+
+      // Supabase nuance: no error + empty identities means the email is already registered.
+      const user = authData?.user as unknown as { identities?: unknown[] }
+      if (user && Array.isArray(user.identities) && user.identities.length === 0) {
+        return {
+          data: null,
+          error: { message: 'An account with this email already exists. Please sign in or reset your password.' },
+        }
       }
 
       return { data: authData, error: null }
