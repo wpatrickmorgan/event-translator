@@ -19,7 +19,22 @@ export class AuthService {
         },
       })
 
-      return { data: authData, error: authError }
+      if (authError) {
+        const rawMessage = (typeof authError === 'object' && authError && 'message' in authError)
+          ? String((authError as unknown as Record<string, unknown>).message)
+          : ''
+
+        if (/user.*already.*(registered|exists)|already.*registered/i.test(rawMessage)) {
+          return {
+            data: null,
+            error: { message: 'An account with this email already exists. Please sign in or reset your password.' },
+          }
+        }
+
+        return { data: null, error: authError }
+      }
+
+      return { data: authData, error: null }
     } catch (error) {
       return { data: null, error }
     }
