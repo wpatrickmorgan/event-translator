@@ -29,7 +29,7 @@ export default function AuthCallback() {
         } else {
           setError('No session found')
         }
-      } catch (_err) {
+      } catch {
         setError('An unexpected error occurred')
       } finally {
         setLoading(false)

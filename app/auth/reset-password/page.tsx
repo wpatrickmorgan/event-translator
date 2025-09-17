@@ -12,6 +12,11 @@ import toast from 'react-hot-toast'
 function ResetPasswordForm() {
   const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const [mode, setMode] = useState<'request' | 'reset'>('request')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [updating, setUpdating] = useState(false)
+
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -22,7 +27,23 @@ function ResetPasswordForm() {
     }
   }, [searchParams])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    // Detect Supabase recovery link in hash or query (?type=recovery or #...type=recovery)
+    const hash = typeof window !== 'undefined' ? window.location.hash : ''
+    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+    const typeInHash = hashParams.get('type')
+    const typeInQuery = searchParams.get('type')
+
+    if (typeInHash === 'recovery' || typeInQuery === 'recovery') {
+      setMode('reset')
+      // Clean up sensitive fragments from the URL bar
+      if (hash) {
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
+      }
+    }
+  }, [searchParams])
+
+  const handleSendEmail = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
@@ -36,11 +57,113 @@ function ResetPasswordForm() {
       } else {
         toast.success('Password reset email sent! Check your inbox.')
       }
-    } catch (_err) {
+    } catch {
       toast.error('An unexpected error occurred')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters')
+      return
+    }
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+
+    setUpdating(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) {
+        toast.error(error.message)
+        return
+      }
+      toast.success('Password updated. You are now signed in.')
+      router.push('/')
+      router.refresh()
+    } catch {
+      toast.error('Failed to update password')
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  if (mode === 'reset') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full space-y-8">
+          <div className="text-center">
+            <h1 className="text-3xl font-bold text-gray-900">Set a New Password</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Enter a new password to complete your reset
+            </p>
+          </div>
+
+          <Card className="w-full">
+            <CardHeader className="space-y-1">
+              <CardTitle className="text-2xl text-center">Create New Password</CardTitle>
+              <CardDescription className="text-center">
+                Your session has been verified
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUpdatePassword} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-sm font-medium">
+                    New Password
+                  </label>
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter new password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    disabled={updating}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="confirm_password" className="text-sm font-medium">
+                    Confirm Password
+                  </label>
+                  <Input
+                    id="confirm_password"
+                    type="password"
+                    placeholder="Confirm new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    disabled={updating}
+                  />
+                </div>
+
+                <Button type="submit" className="w-full" disabled={updating}>
+                  {updating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Update Password
+                </Button>
+              </form>
+
+              <div className="mt-6 text-center text-sm">
+                <Button
+                  variant="link"
+                  className="p-0 h-auto font-normal"
+                  onClick={() => router.push('/auth')}
+                  disabled={updating}
+                >
+                  Back to Sign In
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -61,7 +184,7 @@ function ResetPasswordForm() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSendEmail} className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
                   Email

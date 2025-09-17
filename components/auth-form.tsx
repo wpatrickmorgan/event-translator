@@ -72,7 +72,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
           reset() // Clear form after successful signup
         }
       }
-    } catch (_err) {
+    } catch {
       toast.error('An unexpected error occurred')
     }
   }
