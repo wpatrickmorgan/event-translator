@@ -2,11 +2,13 @@
 
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { useRouter } from 'next/navigation'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAuth } from '@/hooks/useAuth'
+import { AuthService } from '@/lib/services/authService'
+import { hasErrorMessage } from '@/lib/types/auth'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { signUpSchema, signInSchema, type SignUpFormData, type SignInFormData } from '@/lib/schemas/auth'
 import toast from 'react-hot-toast'
@@ -18,7 +20,8 @@ interface AuthFormProps {
 
 export function AuthForm({ mode, onModeChange }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false)
-  const { signIn, signUp } = useAuth()
+  const router = useRouter()
+  // No need to get functions from store - use services directly
 
   const signInForm = useForm<SignInFormData>({
     resolver: zodResolver(signInSchema),
@@ -47,19 +50,22 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
   const onSubmit = async (data: SignUpFormData | SignInFormData) => {
     try {
       if (mode === 'signin') {
-        const { error } = await signIn(data.email, data.password)
-        if (error) {
+        const { error } = await AuthService.signIn(data.email, data.password)
+        if (error && hasErrorMessage(error)) {
           toast.error(error.message)
+        } else if (error) {
+          toast.error('Sign in failed')
         } else {
           toast.success('Welcome back!')
-          // Redirect to home page after successful login
-          window.location.href = '/'
+          // Let middleware handle redirect based on user state
         }
       } else {
         const signUpData = data as SignUpFormData
-        const { error } = await signUp(signUpData.email, signUpData.password, signUpData.first_name, signUpData.last_name)
-        if (error) {
+        const { error } = await AuthService.signUp(signUpData)
+        if (error && hasErrorMessage(error)) {
           toast.error(error.message)
+        } else if (error) {
+          toast.error('Sign up failed')
         } else {
           toast.success('Check your email for the confirmation link!')
           reset() // Clear form after successful signup
@@ -77,10 +83,9 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
       return
     }
 
-    toast.error('Password reset functionality is not yet implemented.')
-    toast('Please contact support for password reset assistance.', {
-      duration: 6000,
-    })
+    // Navigate to reset password page with email prefilled
+    const params = new URLSearchParams({ email })
+    router.push(`/auth/reset-password?${params.toString()}`)
   }
 
   return (

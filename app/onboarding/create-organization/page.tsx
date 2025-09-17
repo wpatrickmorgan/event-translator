@@ -6,7 +6,10 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthStore } from '@/lib/stores/authStore'
+import { OrganizationService } from '@/lib/services/organizationService'
+import { UserService } from '@/lib/services/userService'
+import { hasErrorMessage } from '@/lib/types/auth'
 import { Loader2, Building } from 'lucide-react'
 import { createOrganizationSchema, type CreateOrganizationFormData } from '@/lib/schemas/organization'
 import toast from 'react-hot-toast'
@@ -14,7 +17,11 @@ import { useEffect } from 'react'
 
 export default function CreateOrganizationPage() {
   const router = useRouter()
-  const { userState, loading, createOrganization } = useAuth()
+  const user = useAuthStore(state => state.user)
+  const userState = useAuthStore(state => state.userState)
+  const loading = useAuthStore(state => state.loading)
+  const userOrganizations = useAuthStore(state => state.userOrganizations)
+  const setUserData = useAuthStore(state => state.setUserData)
 
   const form = useForm<CreateOrganizationFormData>({
     resolver: zodResolver(createOrganizationSchema),
@@ -43,20 +50,31 @@ export default function CreateOrganizationPage() {
   }, [userState, loading, router])
 
   const onSubmit = async (data: CreateOrganizationFormData) => {
-    try {
-      const { error } = await createOrganization(
-        data.name,
-        data.address_line_1,
-        data.address_line_2 || null,
-        data.city,
-        data.state,
-        data.zip_code
-      )
+    if (!user?.id) {
+      toast.error('User not authenticated')
+      return
+    }
 
-      if (error) {
+    // Check if user can create organization
+    if (!OrganizationService.canCreateOrganization(userOrganizations)) {
+      toast.error('You can only create one organization per admin account at this time')
+      return
+    }
+
+    try {
+      const { error } = await OrganizationService.createOrganization(user.id, data)
+
+      if (error && hasErrorMessage(error)) {
         toast.error(error.message)
+      } else if (error) {
+        toast.error('Failed to create organization')
       } else {
         toast.success('Organization created successfully!')
+        
+        // Refresh user data to get the new organization
+        const userData = await UserService.fetchUserData(user.id)
+        setUserData(userData)
+        
         router.push('/')
       }
     } catch {

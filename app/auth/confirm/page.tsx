@@ -2,7 +2,9 @@
 
 import { useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthStore } from '@/lib/stores/authStore'
+import { AuthService } from '@/lib/services/authService'
+import { hasErrorMessage } from '@/lib/types/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CheckCircle, XCircle, Loader2, Mail } from 'lucide-react'
@@ -11,7 +13,9 @@ import toast from 'react-hot-toast'
 function AuthConfirmContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, userState, loading, resendConfirmation } = useAuth()
+  const user = useAuthStore(state => state.user)
+  const userState = useAuthStore(state => state.userState)
+  const loading = useAuthStore(state => state.loading)
 
   useEffect(() => {
     // Handle the confirmation and routing based on user state
@@ -27,9 +31,16 @@ function AuthConfirmContent() {
   }, [user, userState, loading, router])
 
   const handleResendConfirmation = async () => {
-    const { error } = await resendConfirmation()
-    if (error) {
+    if (!user?.email) {
+      toast.error('No email found')
+      return
+    }
+    
+    const { error } = await AuthService.resendConfirmation(user.email)
+    if (error && hasErrorMessage(error)) {
       toast.error(error.message)
+    } else if (error) {
+      toast.error('Failed to resend confirmation email')
     } else {
       toast.success('Confirmation email sent! Please check your inbox.')
     }

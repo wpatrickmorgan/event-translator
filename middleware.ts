@@ -84,10 +84,12 @@ export async function middleware(req: NextRequest) {
     }
 
     // For confirmed users, check organization membership
+    // Use a simple approach to avoid RLS issues in middleware
     const { data: userOrgs } = await supabase
       .from('user_organizations')
       .select('organization_id')
       .eq('user_id', session.user.id)
+      .limit(1)
 
     const hasOrganization = userOrgs && userOrgs.length > 0
 

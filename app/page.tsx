@@ -1,14 +1,17 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthStore } from '@/lib/stores/authStore'
 import { UserProfile } from '@/components/user-profile'
 import { Button } from '@/components/ui/button'
 import { LogIn, User } from 'lucide-react'
 
 export default function Home() {
   const [connected, setConnected] = useState(false)
-  const { user, loading } = useAuth()
+  const router = useRouter()
+  const user = useAuthStore(state => state.user)
+  const loading = useAuthStore(state => state.loading)
 
   useEffect(() => {
     const testConnection = async () => {
@@ -50,7 +53,7 @@ export default function Home() {
                 <span className="text-sm">{user.email}</span>
               </div>
             ) : (
-              <Button onClick={() => window.location.href = '/auth'}>
+              <Button onClick={() => router.push('/auth')}>
                 <LogIn className="mr-2 h-4 w-4" />
                 Sign In
               </Button>
@@ -84,7 +87,7 @@ export default function Home() {
               Sign up or sign in to start creating and managing your events with real-time translations.
             </p>
             <div className="flex gap-4 justify-center">
-              <Button onClick={() => window.location.href = '/auth'} size="lg">
+              <Button onClick={() => router.push('/auth')} size="lg">
                 <LogIn className="mr-2 h-4 w-4" />
                 Sign In / Sign Up
               </Button>

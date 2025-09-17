@@ -3,17 +3,19 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuthStore } from '@/lib/stores/authStore'
+import { AuthService } from '@/lib/services/authService'
 import { LogOut, User, Mail, Calendar } from 'lucide-react'
 
 export function UserProfile() {
-  const { user, profile, signOut } = useAuth()
+  const user = useAuthStore(state => state.user)
+  const profile = useAuthStore(state => state.profile)
   const [loading, setLoading] = useState(false)
 
   const handleSignOut = async () => {
     setLoading(true)
     try {
-      await signOut()
+      await AuthService.signOut()
     } catch (error) {
       console.error('Error signing out:', error)
     } finally {
