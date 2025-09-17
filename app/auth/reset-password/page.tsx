@@ -107,8 +107,8 @@ function ResetPasswordForm() {
         return
       }
       toast.success('Password updated. You are now signed in.')
-      router.push('/')
-      router.refresh()
+      await supabase.auth.getSession() // ensure client has session cookies
+      router.replace('/')              // no refresh; lets middleware run cleanly
     } catch {
       toast.error('Failed to update password')
     } finally {

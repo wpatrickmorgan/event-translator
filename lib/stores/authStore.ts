@@ -88,16 +88,18 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       
       if (user) {
         set({ loading: true })
-        
-        // Create profile if user is confirmed and doesn't have one
-        if (user.email_confirmed_at) {
-          await AuthService.createProfileFromSession(user)
+        try {
+          // Create profile if user is confirmed and doesn't have one
+          if (user.email_confirmed_at) {
+            await AuthService.createProfileFromSession(user)
+          }
+          
+          // Fetch user data
+          const userData = await UserService.fetchUserData(user.id)
+          get().setUserData(userData)
+        } finally {
+          set({ loading: false }) // always clear
         }
-        
-        // Fetch user data
-        const userData = await UserService.fetchUserData(user.id)
-        get().setUserData(userData)
-        set({ loading: false })
       } else {
         set({ 
           profile: null, 
