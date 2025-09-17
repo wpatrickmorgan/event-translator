@@ -3,11 +3,18 @@ import { useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { Database } from '@/types/database.types'
+import { ROLES } from '@/lib/constants/roles'
 
 // Define types directly from database schema
 type Profile = Database['public']['Tables']['profiles']['Row']
 type UserOrganization = Database['public']['Tables']['user_organizations']['Row']
 type Organization = Database['public']['Tables']['organizations']['Row']
+
+export type UserState = 
+  | 'not_signed_up'
+  | 'unconfirmed'
+  | 'confirmed_no_organization'
+  | 'confirmed_with_organization'
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
@@ -131,6 +138,90 @@ export function useAuth() {
 
   const hasOrganization = userOrganizations.length > 0
 
+  // User state detection
+  const getUserState = (): UserState => {
+    if (!user) return 'not_signed_up'
+    if (!user.email_confirmed_at) return 'unconfirmed'
+    if (!profile) return 'unconfirmed' // Profile not created yet
+    if (!hasOrganization) return 'confirmed_no_organization'
+    return 'confirmed_with_organization'
+  }
+
+  const createOrganization = async (
+    name: string,
+    address_line_1: string,
+    address_line_2: string | null,
+    city: string,
+    state: string,
+    zip_code: string
+  ) => {
+    if (!user || !profile) {
+      return { data: null, error: { message: 'User not authenticated' } }
+    }
+
+    // Check if user already has an organization
+    if (hasOrganization) {
+      return { data: null, error: { message: 'You can only create one organization per admin account at this time' } }
+    }
+
+    try {
+      // Generate slug from organization name
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+
+      // Create organization
+      const { data: orgData, error: orgError } = await supabase
+        .from('organizations')
+        .insert({
+          name,
+          slug,
+          address_line_1,
+          address_line_2,
+          city,
+          state,
+          zip_code,
+          created_by: user.id,
+        })
+        .select()
+        .single()
+
+      if (orgError) return { data: null, error: orgError }
+
+      // Add user to organization as admin
+      const { error: userOrgError } = await supabase
+        .from('user_organizations')
+        .insert({
+          user_id: user.id,
+          organization_id: orgData.id,
+          role: ROLES.ADMIN,
+        })
+
+      if (userOrgError) return { data: null, error: userOrgError }
+
+      // Refresh user data
+      await fetchUserData(user.id)
+
+      return { data: orgData, error: null }
+    } catch (error) {
+      return { data: null, error: error as any }
+    }
+  }
+
+  const resendConfirmation = async () => {
+    if (!user?.email) {
+      return { error: { message: 'No email found' } }
+    }
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: user.email,
+    })
+
+    return { error }
+  }
+
   return {
     user,
     profile,
@@ -140,6 +231,9 @@ export function useAuth() {
     signIn,
     signOut,
     hasOrganization,
+    userState: getUserState(),
+    createOrganization,
+    resendConfirmation,
     refetchUserData: () => user && fetchUserData(user.id),
   }
 }

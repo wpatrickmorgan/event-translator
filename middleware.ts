@@ -59,19 +59,53 @@ export async function middleware(req: NextRequest) {
     data: { session },
   } = await supabase.auth.getSession()
 
-  // If user is not signed in and the current path is not /auth or /auth/reset-password
-  // redirect them to /auth
-  if (!session && !req.nextUrl.pathname.startsWith('/auth')) {
+  const pathname = req.nextUrl.pathname
+
+  // Allow access to auth pages for unauthenticated users
+  if (!session && !pathname.startsWith('/auth')) {
     const redirectUrl = req.nextUrl.clone()
     redirectUrl.pathname = '/auth'
     return NextResponse.redirect(redirectUrl)
   }
 
-  // If user is signed in and trying to access /auth, redirect to home
-  if (session && req.nextUrl.pathname.startsWith('/auth')) {
-    const redirectUrl = req.nextUrl.clone()
-    redirectUrl.pathname = '/'
-    return NextResponse.redirect(redirectUrl)
+  // Handle authenticated users
+  if (session) {
+    // Check if email is confirmed
+    const isConfirmed = !!session.user.email_confirmed_at
+
+    if (!isConfirmed) {
+      // Allow access to auth pages for unconfirmed users
+      if (!pathname.startsWith('/auth')) {
+        const redirectUrl = req.nextUrl.clone()
+        redirectUrl.pathname = '/auth/confirm'
+        return NextResponse.redirect(redirectUrl)
+      }
+      return response
+    }
+
+    // For confirmed users, check organization membership
+    const { data: userOrgs } = await supabase
+      .from('user_organizations')
+      .select('organization_id')
+      .eq('user_id', session.user.id)
+
+    const hasOrganization = userOrgs && userOrgs.length > 0
+
+    // Confirmed user without organization should go to org creation
+    if (!hasOrganization) {
+      if (pathname !== '/onboarding/create-organization' && !pathname.startsWith('/auth')) {
+        const redirectUrl = req.nextUrl.clone()
+        redirectUrl.pathname = '/onboarding/create-organization'
+        return NextResponse.redirect(redirectUrl)
+      }
+    }
+
+    // Confirmed user with organization trying to access auth or onboarding
+    if (hasOrganization && (pathname.startsWith('/auth') || pathname.startsWith('/onboarding'))) {
+      const redirectUrl = req.nextUrl.clone()
+      redirectUrl.pathname = '/'
+      return NextResponse.redirect(redirectUrl)
+    }
   }
 
   return response
