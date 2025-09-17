@@ -32,33 +32,29 @@ function ResetPasswordForm() {
     const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
     const typeInHash = hashParams.get('type')
 
-    const code = searchParams.get('code') || searchParams.get('token') // fallback styles
-    const emailParam = searchParams.get('email') || email
-
-    const switchToReset = () => {
+    // Hash-based (access_token) recovery
+    if (typeInHash === 'recovery') {
       setMode('reset')
       if (hash) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
       }
-    }
-
-    if (typeInHash === 'recovery') {
-      switchToReset()
       return
     }
 
-    // Fallback: handle code-based recovery links
+    // PKCE code-based recovery
+    const code = searchParams.get('code')
     if (code) {
       ;(async () => {
-        const { error } = await supabase.auth.verifyOtp({
-          type: 'recovery',
-          token: code,
-          email: emailParam ?? ''
-        })
-        if (!error) switchToReset()
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
+        if (!error) {
+          setMode('reset')
+          const url = new URL(window.location.href)
+          url.searchParams.delete('code')
+          window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''))
+        }
       })()
     }
-  }, [searchParams, email])
+  }, [searchParams])
 
   const handleSendEmail = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -66,7 +62,7 @@ function ResetPasswordForm() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/auth/reset-password`,
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/reset-password?type=recovery`
       })
       
       if (error) {
