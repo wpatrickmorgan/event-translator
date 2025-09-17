@@ -31,26 +31,36 @@ function ResetPasswordForm() {
     const hash = typeof window !== 'undefined' ? window.location.hash : ''
     const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
     const typeInHash = hashParams.get('type')
+    const typeInQuery = searchParams.get('type')
+    const code = searchParams.get('code') // PKCE exchange
 
-    // Hash-based (access_token) recovery
-    if (typeInHash === 'recovery') {
+    const switchToReset = () => {
       setMode('reset')
       if (hash) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
       }
+    }
+
+    // Hash-based recovery (non-PKCE)
+    if (typeInHash === 'recovery') {
+      switchToReset()
       return
     }
 
-    // PKCE code-based recovery
-    const code = searchParams.get('code')
+    // Query-based hint from our redirectTo
+    if (typeInQuery === 'recovery') {
+      switchToReset()
+    }
+
+    // PKCE: exchange authorization code for a session
     if (code) {
       ;(async () => {
         const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
         if (!error) {
-          setMode('reset')
+          switchToReset()
           const url = new URL(window.location.href)
           url.searchParams.delete('code')
-          window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''))
+          window.history.replaceState({}, document.title, url.pathname + (url.search || ''))
         }
       })()
     }
