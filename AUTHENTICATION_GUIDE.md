@@ -5,7 +5,7 @@
 Event Translator uses **Zustand + Supabase** with a multi-tenant organization system.
 
 ### User Flow
-1. **Direct Signup** → Email confirmation → Organization creation → App access (admin)
+1. **Direct Signup** → Email confirmation → Organization creation → App access (owner)
 2. **Future**: Invitation system for adding users to existing organizations
 
 ### Tech Stack
@@ -61,7 +61,7 @@ if (error && hasErrorMessage(error)) {
 ## Key Rules
 
 - **Profiles created AFTER email confirmation** (avoids RLS issues)
-- **One organization per admin account**
+- **One organization per owner account**
 - **Use `router.push()` not `window.location.href`**
 - **Services handle business logic, store handles state only**
 

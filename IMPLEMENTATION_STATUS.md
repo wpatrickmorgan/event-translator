@@ -5,7 +5,7 @@
 ### Core User State Management
 - ✅ Updated `useAuth` hook with user state detection
 - ✅ Added user states: `not_signed_up`, `unconfirmed`, `confirmed_no_organization`, `confirmed_with_organization`
-- ✅ Role constants and helpers (`admin`/`user` roles)
+- ✅ Role constants and helpers (`owner`/`user` roles)
 
 ### Pages & Routing
 - ✅ `/auth/confirm` - Handles email confirmation and routing logic
@@ -21,8 +21,8 @@
   - `state` (required)
   - `zip_code` (required)
 - ✅ Auto-generates slug from organization name
-- ✅ Prevents multiple organization creation per admin
-- ✅ Automatic admin role assignment
+- ✅ Prevents multiple organization creation per owner
+- ✅ Automatic owner role assignment
 
 ### Error Handling
 - ✅ Multiple organization creation error
@@ -35,7 +35,7 @@
 1. User visits `/auth` → Signs up → `unconfirmed` state
 2. User clicks email link → `/auth/confirm` → `confirmed_no_organization`
 3. Auto-redirect to `/onboarding/create-organization`
-4. User creates organization → Becomes `admin` → `confirmed_with_organization`
+4. User creates organization → Becomes `owner` → `confirmed_with_organization`
 5. Redirect to `/` (main app)
 
 ### Middleware Routing Logic ✅
@@ -52,18 +52,18 @@ The core system is implemented and ready for testing. Test the flow:
 2. Check email and click confirmation link
 3. Should redirect to organization creation
 4. Fill out organization form
-5. Should redirect to main app as admin
+5. Should redirect to main app as owner
 
 ## 🔄 Future Enhancements (Not Implemented Yet)
 
 ### Invitation System
 - `/api/invite-user` API route with service role key
-- Admin UI for sending invitations
+- Owner UI for sending invitations
 - Invited user flow (auto-organization assignment)
 
 ### Additional Features
 - Password reset flow
-- User management for admins
+- User management for owners
 - Organization settings
 - Role-based permissions throughout app
 

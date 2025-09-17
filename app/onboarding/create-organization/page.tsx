@@ -57,7 +57,7 @@ export default function CreateOrganizationPage() {
 
     // Check if user can create organization
     if (!OrganizationService.canCreateOrganization(userOrganizations)) {
-      toast.error('You can only create one organization per admin account at this time')
+      toast.error('You can only create one organization per owner account at this time')
       return
     }
 

@@ -40,7 +40,7 @@ export class OrganizationService {
         .insert({
           user_id: userId,
           organization_id: orgData.id,
-          role: ROLES.ADMIN,
+          role: ROLES.OWNER,
         })
 
       if (userOrgError) return { data: null, error: userOrgError }

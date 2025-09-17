@@ -43,7 +43,7 @@ lib/
 **Core Tables:**
 - `profiles` - User profile data (created after email confirmation)
 - `organizations` - Organization data with full address
-- `user_organizations` - Junction table with roles (admin/user)
+- `user_organizations` - Junction table with roles (owner/user)
 
 **Address Fields:** `address_line_1`, `address_line_2`, `city`, `state`, `zip_code`
 
@@ -61,13 +61,13 @@ type UserState =
 ### Direct Signup Flow
 1. User signs up → `unconfirmed` (NO profile created yet)
 2. Email confirmation → Profile created → `confirmed_no_organization`
-3. Create organization → Admin role → `confirmed_with_organization`
+3. Create organization → Owner role → `confirmed_with_organization`
 4. Access to main app
 
 ### Critical Auth Rules
 - **Profiles are created AFTER email confirmation** (avoids RLS issues)
 - **User state logic**: Don't block on profile existence, only email confirmation + org membership
-- **One organization per admin account** (enforced in services)
+- **One organization per owner account** (enforced in services)
 - **RLS policies**: Avoid circular references between tables
 
 ## State Management with Zustand
@@ -160,8 +160,8 @@ if (error && hasErrorMessage(error)) {
 
 ## Future Enhancements (Not Implemented Yet)
 
-- **Invitation System**: Server-side API routes + admin UI
-- **User Management**: Admin controls for organization users
+- **Invitation System**: Server-side API routes + owner UI
+- **User Management**: Owner controls for organization users
 - **Organization Settings**: Additional org configuration options
 
 ---
