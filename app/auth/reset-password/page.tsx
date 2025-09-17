@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ function ResetPasswordForm() {
 
   const router = useRouter()
   const searchParams = useSearchParams()
+  const exchanged = useRef(false)
 
   useEffect(() => {
     const emailParam = searchParams.get('email')
@@ -28,33 +29,26 @@ function ResetPasswordForm() {
   }, [searchParams])
 
   useEffect(() => {
-    const hash = typeof window !== 'undefined' ? window.location.hash : ''
-    const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
-    const typeInHash = hashParams.get('type')
-    const typeInQuery = searchParams.get('type')
-    const code = searchParams.get('code') // PKCE exchange
+    const run = async () => {
+      const hash = typeof window !== 'undefined' ? window.location.hash : ''
+      const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+      const typeInHash = hashParams.get('type')
+      const typeInQuery = searchParams.get('type')
+      const code = searchParams.get('code')
 
-    const switchToReset = () => {
-      setMode('reset')
-      if (hash) {
-        window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
+      const switchToReset = () => {
+        setMode('reset')
+        if (hash) window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
       }
-    }
 
-    // Hash-based recovery (non-PKCE)
-    if (typeInHash === 'recovery') {
-      switchToReset()
-      return
-    }
+      if (typeInHash === 'recovery' || typeInQuery === 'recovery') switchToReset()
 
-    // Query-based hint from our redirectTo
-    if (typeInQuery === 'recovery') {
-      switchToReset()
-    }
+      // Skip if we already have a session or already exchanged
+      const { data: sess } = await supabase.auth.getSession()
+      if (sess.session || exchanged.current) return
 
-    // PKCE: exchange authorization code for a session
-    if (code) {
-      ;(async () => {
+      if (code) {
+        exchanged.current = true
         const { error } = await supabase.auth.exchangeCodeForSession(window.location.href)
         if (!error) {
           switchToReset()
@@ -62,8 +56,9 @@ function ResetPasswordForm() {
           url.searchParams.delete('code')
           window.history.replaceState({}, document.title, url.pathname + (url.search || ''))
         }
-      })()
+      }
     }
+    run()
   }, [searchParams])
 
   const handleSendEmail = async (e: React.FormEvent) => {
