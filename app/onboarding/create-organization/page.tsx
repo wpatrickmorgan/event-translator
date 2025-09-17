@@ -14,7 +14,7 @@ import { useEffect } from 'react'
 
 export default function CreateOrganizationPage() {
   const router = useRouter()
-  const { user, userState, loading, createOrganization } = useAuth()
+  const { userState, loading, createOrganization } = useAuth()
 
   const form = useForm<CreateOrganizationFormData>({
     resolver: zodResolver(createOrganizationSchema),
@@ -59,7 +59,7 @@ export default function CreateOrganizationPage() {
         toast.success('Organization created successfully!')
         router.push('/')
       }
-    } catch (err) {
+    } catch {
       toast.error('An unexpected error occurred')
     }
   }
