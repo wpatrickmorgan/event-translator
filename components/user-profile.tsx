@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuthStore } from '@/lib/stores/authStore'
@@ -11,11 +12,15 @@ export function UserProfile() {
   const user = useAuthStore(state => state.user)
   const profile = useAuthStore(state => state.profile)
   const [loading, setLoading] = useState(false)
+  const router = useRouter()
 
   const handleSignOut = async () => {
     setLoading(true)
     try {
       await AuthService.signOut()
+      // Redirect to auth page after sign out
+      router.push('/auth')
+      router.refresh()
     } catch (error) {
       console.error('Error signing out:', error)
     } finally {
