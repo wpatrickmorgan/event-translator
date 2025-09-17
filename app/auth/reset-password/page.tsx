@@ -28,20 +28,37 @@ function ResetPasswordForm() {
   }, [searchParams])
 
   useEffect(() => {
-    // Detect Supabase recovery link in hash or query (?type=recovery or #...type=recovery)
     const hash = typeof window !== 'undefined' ? window.location.hash : ''
     const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
     const typeInHash = hashParams.get('type')
-    const typeInQuery = searchParams.get('type')
 
-    if (typeInHash === 'recovery' || typeInQuery === 'recovery') {
+    const code = searchParams.get('code') || searchParams.get('token') // fallback styles
+    const emailParam = searchParams.get('email') || email
+
+    const switchToReset = () => {
       setMode('reset')
-      // Clean up sensitive fragments from the URL bar
       if (hash) {
         window.history.replaceState({}, document.title, window.location.pathname + window.location.search)
       }
     }
-  }, [searchParams])
+
+    if (typeInHash === 'recovery') {
+      switchToReset()
+      return
+    }
+
+    // Fallback: handle code-based recovery links
+    if (code) {
+      ;(async () => {
+        const { error } = await supabase.auth.verifyOtp({
+          type: 'recovery',
+          token: code,
+          email: emailParam ?? ''
+        })
+        if (!error) switchToReset()
+      })()
+    }
+  }, [searchParams, email])
 
   const handleSendEmail = async (e: React.FormEvent) => {
     e.preventDefault()
