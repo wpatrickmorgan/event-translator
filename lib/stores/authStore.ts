@@ -82,30 +82,27 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ loading: false })
 
     // Listen for auth changes - single listener for entire app
-    AuthService.onAuthStateChange(async (event, session) => {
+    AuthService.onAuthStateChange(async (_event, session) => {
       const user = (session as Session | null)?.user ?? null
       set({ user })
-      
+
       if (user) {
-        set({ loading: true })
-        try {
-          // Create profile if user is confirmed and doesn't have one
-          if (user.email_confirmed_at) {
-            await AuthService.createProfileFromSession(user)
+        // Don't block the UI spinner on background fetches
+        set({ loading: false })
+
+        ;(async () => {
+          try {
+            if (user.email_confirmed_at) {
+              await AuthService.createProfileFromSession(user)
+            }
+            const userData = await UserService.fetchUserData(user.id)
+            get().setUserData(userData)
+          } catch {
+            // ignore; state stays usable
           }
-          
-          // Fetch user data
-          const userData = await UserService.fetchUserData(user.id)
-          get().setUserData(userData)
-        } finally {
-          set({ loading: false }) // always clear
-        }
+        })()
       } else {
-        set({ 
-          profile: null, 
-          userOrganizations: [], 
-          loading: false 
-        })
+        set({ profile: null, userOrganizations: [], loading: false })
       }
     })
   },
