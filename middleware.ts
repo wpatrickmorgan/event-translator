@@ -74,6 +74,12 @@ export async function middleware(req: NextRequest) {
     const isConfirmed = !!session.user.email_confirmed_at
 
     if (!isConfirmed) {
+      // Redirect unconfirmed users away from non-confirm auth pages
+      if (pathname.startsWith('/auth') && pathname !== '/auth/confirm') {
+        const redirectUrl = req.nextUrl.clone()
+        redirectUrl.pathname = '/auth/confirm'
+        return NextResponse.redirect(redirectUrl)
+      }
       // Allow access to auth pages for unconfirmed users
       if (!pathname.startsWith('/auth')) {
         const redirectUrl = req.nextUrl.clone()
@@ -95,7 +101,13 @@ export async function middleware(req: NextRequest) {
 
     // Confirmed user without organization should go to org creation
     if (!hasOrganization) {
-      if (pathname !== '/onboarding/create-organization' && !pathname.startsWith('/auth')) {
+      // Redirect away from auth pages to org creation
+      if (pathname.startsWith('/auth')) {
+        const redirectUrl = req.nextUrl.clone()
+        redirectUrl.pathname = '/onboarding/create-organization'
+        return NextResponse.redirect(redirectUrl)
+      }
+      if (pathname !== '/onboarding/create-organization') {
         const redirectUrl = req.nextUrl.clone()
         redirectUrl.pathname = '/onboarding/create-organization'
         return NextResponse.redirect(redirectUrl)

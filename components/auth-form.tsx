@@ -57,7 +57,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
           toast.error('Sign in failed')
         } else {
           toast.success('Welcome back!')
-          // Let middleware handle redirect based on user state
+          router.push('/')
         }
       } else {
         const signUpData = data as SignUpFormData
