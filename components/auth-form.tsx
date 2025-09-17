@@ -58,6 +58,7 @@ export function AuthForm({ mode, onModeChange }: AuthFormProps) {
         } else {
           toast.success('Welcome back!')
           router.push('/')
+          router.refresh()
         }
       } else {
         const signUpData = data as SignUpFormData
