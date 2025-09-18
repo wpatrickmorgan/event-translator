@@ -8,6 +8,7 @@ import { EventService } from '@/lib/services/eventService'
 import { Loader2, ArrowLeft, Calendar, Users, Globe, Shield } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
+import type { EventStatus } from '@/lib/types/event'
 
 export default function EventDetailPage() {
   const params = useParams()
@@ -161,11 +162,11 @@ export default function EventDetailPage() {
   )
 }
 
-function EventControls({ eventId, currentStatus }: { eventId: string; currentStatus: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled' }) {
+function EventControls({ eventId, currentStatus }: { eventId: string; currentStatus: EventStatus }) {
   const queryClient = useQueryClient()
 
   const { mutateAsync, isPending } = useMutation({
-    mutationFn: async (next: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled') => {
+    mutationFn: async (next: EventStatus) => {
       const { error } = await EventService.updateEventStatus(eventId, next)
       if (error) throw new Error(error)
     },

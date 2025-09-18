@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { EventWithLanguages, Event } from '@/lib/types/event'
+import type { EventWithLanguages, Event, EventStatus } from '@/lib/types/event'
 import type { CreateEventFormData } from '@/lib/schemas/event'
 import { OrganizationService } from './organizationService'
 import { slugify } from '@/lib/utils'
@@ -176,7 +176,7 @@ export class EventService {
    */
   static async updateEventStatus(
     eventId: string,
-    status: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled'
+    status: EventStatus
   ): Promise<{ data: Event | null; error: string | null }> {
     try {
       const { data, error } = await supabase
