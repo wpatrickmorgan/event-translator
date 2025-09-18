@@ -107,8 +107,8 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* Main Content Area */}
       <div
-        className="transition-[margin-left] duration-300 ease-in-out pt-16 min-h-[calc(100vh-4rem)]"
-        style={{ marginLeft: `${sidebarWidth}px` }}
+        className="fixed top-16 right-0 bottom-0 transition-[left] duration-300 ease-in-out"
+        style={{ left: `${sidebarWidth}px` }}
       >
         {/* Page Content */}
         <main className="h-full overflow-auto">
