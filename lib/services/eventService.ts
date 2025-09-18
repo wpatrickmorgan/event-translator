@@ -171,5 +171,33 @@ export class EventService {
     return 'audio_only'
   }
 
+  /**
+   * Update event status
+   */
+  static async updateEventStatus(
+    eventId: string,
+    status: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled'
+  ): Promise<{ data: Event | null; error: string | null }> {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .update({ status })
+        .eq('id', eventId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating event status:', error)
+        return { data: null, error: error.message }
+      }
+      return { data, error: null }
+    } catch (error) {
+      return {
+        data: null,
+        error: error instanceof Error ? error.message : 'Failed to update status',
+      }
+    }
+  }
+
   // TODO: Add subscribeToEvents realtime helper for future phases
 }

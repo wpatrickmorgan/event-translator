@@ -1,12 +1,13 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { EventService } from '@/lib/services/eventService'
 import { Loader2, ArrowLeft, Calendar, Users, Globe, Shield } from 'lucide-react'
 import { format } from 'date-fns'
+import toast from 'react-hot-toast'
 
 export default function EventDetailPage() {
   const params = useParams()
@@ -124,6 +125,7 @@ export default function EventDetailPage() {
                 <div>
                   <label className="text-sm font-medium text-gray-500">Join Code</label>
                   <p className="text-lg font-mono font-bold text-blue-600">{event.join_code}</p>
+                  <p className="text-xs text-gray-500 mt-1">Note: Join code is case sensitive.</p>
                 </div>
               )}
 
@@ -144,21 +146,53 @@ export default function EventDetailPage() {
           </Card>
         </div>
 
-        {/* Placeholder for future features */}
+        {/* Event Management Controls */}
         <Card className="mt-6">
           <CardHeader>
             <CardTitle>Event Management</CardTitle>
-            <CardDescription>
-              Event management features will be available in future updates
-            </CardDescription>
+            <CardDescription>Control the event lifecycle</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8 text-gray-500">
-              <p>Event controls and language management coming soon...</p>
-            </div>
+            <EventControls eventId={event.id} currentStatus={event.status} />
           </CardContent>
         </Card>
       </div>
+    </div>
+  )
+}
+
+function EventControls({ eventId, currentStatus }: { eventId: string; currentStatus: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled' }) {
+  const queryClient = useQueryClient()
+
+  const { mutateAsync, isPending } = useMutation({
+    mutationFn: async (next: 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled') => {
+      const { error } = await EventService.updateEventStatus(eventId, next)
+      if (error) throw new Error(error)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] })
+      toast.success('Status updated')
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to update status')
+    },
+  })
+
+  const canStart = currentStatus === 'scheduled' || currentStatus === 'paused'
+  const canPause = currentStatus === 'live'
+  const canEnd = currentStatus === 'scheduled' || currentStatus === 'live' || currentStatus === 'paused'
+
+  return (
+    <div className="flex gap-3">
+      <Button onClick={() => mutateAsync('live')} disabled={!canStart || isPending}>
+        Start
+      </Button>
+      <Button variant="secondary" onClick={() => mutateAsync('paused')} disabled={!canPause || isPending}>
+        Pause
+      </Button>
+      <Button variant="destructive" onClick={() => mutateAsync('ended')} disabled={!canEnd || isPending}>
+        End
+      </Button>
     </div>
   )
 }
