@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import { useReactTable, getCoreRowModel, createColumnHelper, flexRender } from '@tanstack/react-table'
 import { format } from 'date-fns'
+import { useRouter } from 'next/navigation'
 import type { EventWithLanguages } from '@/lib/types/event'
 
 interface EventsTableProps {
@@ -12,6 +13,8 @@ interface EventsTableProps {
 const columnHelper = createColumnHelper<EventWithLanguages>()
 
 export function EventsTable({ events }: EventsTableProps) {
+  const router = useRouter()
+  
   const columns = useMemo(
     () => [
       columnHelper.accessor('name', {
@@ -102,7 +105,19 @@ export function EventsTable({ events }: EventsTableProps) {
         </thead>
         <tbody>
           {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} className="border-b hover:bg-muted/50">
+            <tr
+              key={row.id}
+              className="border-b hover:bg-muted/50 cursor-pointer"
+              role="button"
+              tabIndex={0}
+              onClick={() => router.push(`/events/${row.original.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  router.push(`/events/${row.original.id}`)
+                }
+              }}
+            >
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id} className="py-3 px-4">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
