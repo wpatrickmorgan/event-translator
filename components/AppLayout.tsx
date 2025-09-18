@@ -92,12 +92,11 @@ export function AppLayout({ children }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-background">
       {/* Fixed Header */}
-      <Header
+           <Header
         onMenuToggle={handleMenuToggle}
         userName={userName}
         onEditProfile={handleEditProfile}
         onLogout={handleLogout}
-        mobileOpen={mobileOpen}
       />
 
       {/* Sidebar */}
