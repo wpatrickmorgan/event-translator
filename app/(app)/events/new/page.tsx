@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,6 +22,7 @@ import toast from 'react-hot-toast'
 
 export default function CreateEventPage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
   const user = useAuthStore(state => state.user)
   const loading = useAuthStore(state => state.loading)
   const userOrganizations = useAuthStore(state => state.userOrganizations)
@@ -131,6 +132,8 @@ export default function CreateEventPage() {
         toast.error(error)
       } else if (eventData) {
         toast.success('Event created successfully!')
+        // Mark events list stale so it refetches when navigating back
+        queryClient.invalidateQueries({ queryKey: ['events'] })
         router.push(`/events/${eventData.id}`)
       }
     } catch {

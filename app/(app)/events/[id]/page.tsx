@@ -163,7 +163,9 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
       if (error) throw new Error(error)
     },
     onSuccess: () => {
+      // Refresh this event and mark events list stale so it refetches when visiting `/events`
       queryClient.invalidateQueries({ queryKey: ['event', eventId] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
       toast.success('Status updated')
     },
     onError: (err: unknown) => {
