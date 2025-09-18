@@ -69,6 +69,7 @@ export function Sidebar({
               <Link
                 key={link.href}
                 href={link.href}
+                onClick={() => mobileOpen && onMobileOpenChange(false)}
                 className={cn(
                   'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                   'hover:bg-accent hover:text-accent-foreground',
@@ -93,6 +94,7 @@ export function Sidebar({
           onClick={onToggleCollapse}
           className="h-8 w-8"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -113,13 +115,14 @@ export function Sidebar({
           'md:block',
           collapsed ? 'w-16' : 'w-64'
         )}
+        style={{ width: 'var(--sidebar-width)' }}
       >
         <SidebarContent />
       </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-64 p-0" id="mobile-sidebar">
           <SidebarContent />
         </SheetContent>
       </Sheet>

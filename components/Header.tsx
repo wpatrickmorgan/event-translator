@@ -17,6 +17,7 @@ interface HeaderProps {
   avatarUrl?: string
   onEditProfile: () => void
   onLogout: () => Promise<void>
+  mobileOpen?: boolean
 }
 
 export function Header({
@@ -25,6 +26,7 @@ export function Header({
   avatarUrl,
   onEditProfile,
   onLogout,
+  mobileOpen = false,
 }: HeaderProps) {
   // Generate initials from user name
   const getInitials = (name: string) => {
@@ -46,6 +48,8 @@ export function Header({
           onClick={onMenuToggle}
           className="md:hidden"
           aria-label="Toggle menu"
+          aria-controls="mobile-sidebar"
+          aria-expanded={mobileOpen}
         >
           <Menu className="h-5 w-5" />
         </Button>

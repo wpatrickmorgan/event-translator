@@ -16,7 +16,9 @@ const SIDEBAR_STORAGE_KEY = 'et.sidebar.collapsed'
 
 export function AppLayout({ children }: AppLayoutProps) {
   const router = useRouter()
-  const { user, profile, loading } = useAuthStore()
+  const user = useAuthStore(s => s.user)
+  const profile = useAuthStore(s => s.profile)
+  const loading = useAuthStore(s => s.loading)
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -70,7 +72,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const handleLogout = async () => {
     await AuthService.signOut()
-    router.push('/auth')
+    router.replace('/auth')
   }
 
   const handleEditProfile = () => {
@@ -85,16 +87,20 @@ export function AppLayout({ children }: AppLayoutProps) {
     setCollapsed(!collapsed)
   }
 
-  const sidebarWidth = collapsed ? 64 : 256
+  const sidebarWidth = collapsed ? '4rem' : '16rem'
 
   return (
-    <div className="min-h-screen bg-background">
+    <div 
+      className="min-h-screen bg-background"
+      style={{ '--sidebar-width': sidebarWidth } as React.CSSProperties}
+    >
       {/* Fixed Header */}
       <Header
         onMenuToggle={handleMenuToggle}
         userName={userName}
         onEditProfile={handleEditProfile}
         onLogout={handleLogout}
+        mobileOpen={mobileOpen}
       />
 
       {/* Sidebar */}
@@ -106,10 +112,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       />
 
       {/* Main Content Area */}
-      <div
-        className="fixed top-16 right-0 bottom-0 transition-[left] duration-300 ease-in-out"
-        style={{ left: `${sidebarWidth}px` }}
-      >
+      <div className="fixed top-16 right-0 bottom-0 ml-0 md:ml-[var(--sidebar-width)] transition-[margin-left] duration-300 ease-in-out">
         {/* Page Content */}
         <main className="h-full overflow-auto">
           {children}
