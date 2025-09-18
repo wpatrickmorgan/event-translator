@@ -87,13 +87,10 @@ export function AppLayout({ children }: AppLayoutProps) {
     setCollapsed(!collapsed)
   }
 
-  const sidebarWidth = collapsed ? '4rem' : '16rem'
+  const sidebarWidth = collapsed ? '64px' : '256px'
 
   return (
-    <div 
-      className="min-h-screen bg-background"
-      style={{ '--sidebar-width': sidebarWidth } as React.CSSProperties}
-    >
+    <div className="min-h-screen bg-background">
       {/* Fixed Header */}
       <Header
         onMenuToggle={handleMenuToggle}
@@ -112,7 +109,10 @@ export function AppLayout({ children }: AppLayoutProps) {
       />
 
       {/* Main Content Area */}
-      <div className="fixed top-16 right-0 bottom-0 ml-0 md:ml-[var(--sidebar-width)] transition-[margin-left] duration-300 ease-in-out">
+      <div 
+        className="fixed top-16 right-0 bottom-0 pl-0 md:pl-[var(--sidebar-width)] transition-[padding-left] duration-300 ease-in-out"
+        style={{ '--sidebar-width': sidebarWidth } as React.CSSProperties}
+      >
         {/* Page Content */}
         <main className="h-full overflow-auto">
           {children}

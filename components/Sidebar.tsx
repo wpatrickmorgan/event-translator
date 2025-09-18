@@ -56,7 +56,7 @@ export function Sidebar({
     return pathname.startsWith(href + '/') || pathname === href
   }
 
-  const SidebarContent = () => (
+  const SidebarContent = ({ onNavigate }: { onNavigate?: () => void } = {}) => (
     <div className="flex h-full flex-col">
       {/* Navigation Links */}
       <ScrollArea className="flex-1 px-3 py-4">
@@ -69,7 +69,7 @@ export function Sidebar({
               <Link
                 key={link.href}
                 href={link.href}
-                onClick={() => mobileOpen && onMobileOpenChange(false)}
+                onClick={onNavigate}
                 className={cn(
                   'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                   'hover:bg-accent hover:text-accent-foreground',
@@ -94,7 +94,7 @@ export function Sidebar({
           onClick={onToggleCollapse}
           className="h-8 w-8"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-expanded={!collapsed}
+          aria-expanded={collapsed ? 'false' : 'true'}
         >
           {collapsed ? (
             <ChevronRight className="h-4 w-4" />
@@ -112,10 +112,9 @@ export function Sidebar({
       <aside
         className={cn(
           'fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] border-r bg-background transition-[width] duration-300 ease-in-out',
-          'md:block',
-          collapsed ? 'w-16' : 'w-64'
+          'md:block'
         )}
-        style={{ width: 'var(--sidebar-width)' }}
+        style={{ '--sidebar-width': collapsed ? '64px' : '256px', width: 'var(--sidebar-width)' } as React.CSSProperties}
       >
         <SidebarContent />
       </aside>
@@ -123,7 +122,7 @@ export function Sidebar({
       {/* Mobile Sidebar */}
       <Sheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
         <SheetContent side="left" className="w-64 p-0" id="mobile-sidebar">
-          <SidebarContent />
+          <SidebarContent onNavigate={() => onMobileOpenChange(false)} />
         </SheetContent>
       </Sheet>
     </>
