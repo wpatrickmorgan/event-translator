@@ -64,16 +64,6 @@ export default function CreateEventPage() {
     lang.name_native.toLowerCase().includes(languageSearch.toLowerCase())
   )
 
-  // Redirect if user is not in the right state
-  useEffect(() => {
-    if (!loading) {
-      if (userState === 'not_signed_up' || userState === 'unconfirmed') {
-        router.push('/auth')
-      } else if (userState === 'confirmed_no_organization') {
-        router.push('/onboarding/create-organization')
-      }
-    }
-  }, [userState, loading, router])
 
   // Update form languages when selectedLanguages changes
   useEffect(() => {
@@ -160,25 +150,13 @@ export default function CreateEventPage() {
     )
   }
 
-  if (!orgId) {
+  if (loading || !orgId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-xl text-center">No Organization Found</CardTitle>
-            <CardDescription className="text-center">
-              You need to create an organization before creating events.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button 
-              onClick={() => router.push('/onboarding/create-organization')}
-              className="w-full"
-            >
-              Create Organization
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Loading...</p>
+        </div>
       </div>
     )
   }
