@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EventService } from '@/lib/services/eventService'
 import { Loader2, ArrowLeft, Calendar, Users, Globe, Shield } from 'lucide-react'
 import { format } from 'date-fns'
@@ -93,10 +93,6 @@ export default function EventDetailPage() {
                 <label className="text-sm font-medium text-gray-500">Start Time</label>
                 <p className="text-lg">{format(new Date(event.start_time), 'PPP p')}</p>
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-500">Status</label>
-                <p className="text-lg capitalize">{event.status}</p>
-              </div>
             </CardContent>
           </Card>
 
@@ -149,10 +145,6 @@ export default function EventDetailPage() {
 
         {/* Event Management Controls */}
         <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Event Management</CardTitle>
-            <CardDescription>Control the event lifecycle</CardDescription>
-          </CardHeader>
           <CardContent>
             <EventControls eventId={event.id} currentStatus={event.status} />
           </CardContent>
@@ -182,43 +174,34 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
   const canStart = currentStatus === 'scheduled' || currentStatus === 'paused'
   const canPause = currentStatus === 'live'
   const canEnd = currentStatus === 'scheduled' || currentStatus === 'live' || currentStatus === 'paused'
+  const isEnded = currentStatus === 'ended'
 
   const getStatusInfo = (status: EventStatus) => {
     switch (status) {
       case 'scheduled':
-        return { label: 'Waiting', color: 'bg-gray-500', textColor: 'text-gray-700' }
+        return { label: 'waiting', color: 'bg-gray-500', textColor: 'text-gray-700' }
       case 'live':
-        return { label: 'Running', color: 'bg-green-500', textColor: 'text-green-700' }
+        return { label: 'live', color: 'bg-green-500', textColor: 'text-green-700' }
       case 'paused':
-        return { label: 'Paused', color: 'bg-yellow-500', textColor: 'text-yellow-700' }
+        return { label: 'paused', color: 'bg-yellow-500', textColor: 'text-yellow-700' }
       case 'ended':
-        return { label: 'Ended', color: 'bg-red-500', textColor: 'text-red-700' }
+        return { label: 'ended', color: 'bg-red-500', textColor: 'text-red-700' }
       case 'canceled':
-        return { label: 'Canceled', color: 'bg-gray-500', textColor: 'text-gray-700' }
+        return { label: 'ended', color: 'bg-gray-500', textColor: 'text-gray-700' }
       default:
-        return { label: 'Unknown', color: 'bg-gray-500', textColor: 'text-gray-700' }
+        return { label: 'waiting', color: 'bg-gray-500', textColor: 'text-gray-700' }
     }
   }
 
   const statusInfo = getStatusInfo(currentStatus)
 
   return (
-    <div className="space-y-4">
-      {/* Status Indicator */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className={`w-3 h-3 rounded-full ${statusInfo.color}`} />
-          <span className={`text-sm font-medium ${statusInfo.textColor}`}>
-            Translation Status: {statusInfo.label}
-          </span>
-        </div>
-      </div>
-
+    <div className="flex items-center justify-between">
       {/* Control Buttons */}
       <div className="flex gap-3">
         <Button 
           onClick={() => mutateAsync('live')} 
-          disabled={!canStart || isPending}
+          disabled={!canStart || isPending || isEnded}
           className="bg-green-600 hover:bg-green-700 text-white"
         >
           Start
@@ -226,7 +209,7 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
         <Button 
           variant="secondary" 
           onClick={() => mutateAsync('paused')} 
-          disabled={!canPause || isPending}
+          disabled={!canPause || isPending || isEnded}
           className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border-yellow-300"
         >
           Pause
@@ -234,10 +217,18 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
         <Button 
           variant="destructive" 
           onClick={() => mutateAsync('ended')} 
-          disabled={!canEnd || isPending}
+          disabled={!canEnd || isPending || isEnded}
         >
           End
         </Button>
+      </div>
+
+      {/* Status Indicator */}
+      <div className="flex items-center gap-2">
+        <div className={`w-3 h-3 rounded-full ${statusInfo.color}`} />
+        <span className={`text-sm font-medium ${statusInfo.textColor}`}>
+          {statusInfo.label}
+        </span>
       </div>
     </div>
   )
