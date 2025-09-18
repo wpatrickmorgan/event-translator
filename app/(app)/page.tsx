@@ -7,7 +7,7 @@ import { UserProfile } from '@/components/user-profile'
 import { Button } from '@/components/ui/button'
 import { LogIn, User } from 'lucide-react'
 
-export default function Home() {
+export default function Dashboard() {
   const [connected, setConnected] = useState(false)
   const router = useRouter()
   const user = useAuthStore(state => state.user)
