@@ -157,19 +157,54 @@ export default function EventDetailPage() {
 function EventControls({ eventId, currentStatus }: { eventId: string; currentStatus: EventStatus }) {
   const queryClient = useQueryClient()
 
-  const { mutateAsync, isPending } = useMutation({
-    mutationFn: async (next: EventStatus) => {
-      const { error } = await EventService.updateEventStatus(eventId, next)
+  const start = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/events/${eventId}/start`, { method: 'POST' })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: 'Failed to start' }))
+        throw new Error(error || 'Failed to start')
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      toast.success('Event started')
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to start')
+    },
+  })
+
+  const end = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/events/${eventId}/end`, { method: 'POST' })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: 'Failed to end' }))
+        throw new Error(error || 'Failed to end')
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['event', eventId] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      toast.success('Event ended')
+    },
+    onError: (err: unknown) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to end')
+    },
+  })
+
+  const pause = useMutation({
+    mutationFn: async () => {
+      const { error } = await EventService.updateEventStatus(eventId, 'paused')
       if (error) throw new Error(error)
     },
     onSuccess: () => {
-      // Refresh this event and mark events list stale so it refetches when visiting `/events`
       queryClient.invalidateQueries({ queryKey: ['event', eventId] })
       queryClient.invalidateQueries({ queryKey: ['events'] })
-      toast.success('Status updated')
+      toast.success('Event paused')
     },
     onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to update status')
+      toast.error(err instanceof Error ? err.message : 'Failed to pause')
     },
   })
 
@@ -199,33 +234,30 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
 
   return (
     <div className="flex items-center justify-between">
-      {/* Control Buttons */}
       <div className="flex gap-3">
-        <Button 
-          onClick={() => mutateAsync('live')} 
-          disabled={!canStart || isPending || isEnded}
+        <Button
+          onClick={() => start.mutate()}
+          disabled={!canStart || start.isPending || isEnded}
           className="bg-green-600 hover:bg-green-700 text-white"
         >
           Start
         </Button>
-        <Button 
-          variant="secondary" 
-          onClick={() => mutateAsync('paused')} 
-          disabled={!canPause || isPending || isEnded}
+        <Button
+          variant="secondary"
+          onClick={() => pause.mutate()}
+          disabled={!canPause || pause.isPending || isEnded}
           className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border-yellow-300"
         >
           Pause
         </Button>
-        <Button 
-          variant="destructive" 
-          onClick={() => mutateAsync('ended')} 
-          disabled={!canEnd || isPending || isEnded}
+        <Button
+          variant="destructive"
+          onClick={() => end.mutate()}
+          disabled={!canEnd || end.isPending || isEnded}
         >
           End
         </Button>
       </div>
-
-      {/* Status Indicator */}
       <div className="flex items-center gap-2">
         <div className={`w-3 h-3 rounded-full ${statusInfo.color}`} />
         <span className={`text-sm font-medium ${statusInfo.textColor}`}>
