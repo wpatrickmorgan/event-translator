@@ -80,8 +80,11 @@ export class EventService {
         return { data: null, error: 'Failed to fetch organization' }
       }
 
-      // Generate room name slug
-      const roomName = this.generateRoomNameSlug(orgData.slug, input.name, createdAt)
+      // Normalize event name (case-insensitive, trimmed)
+      const normalizedName = this.normalizeEventName(input.name)
+
+      // Generate room name slug using normalized name
+      const roomName = this.generateRoomNameSlug(orgData.slug, normalizedName, createdAt)
 
       // Convert start_time_local to UTC using user's timezone
       const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -94,7 +97,7 @@ export class EventService {
       const { data: eventData, error: eventError } = await supabase
         .from('events')
         .insert({
-          name: input.name,
+          name: normalizedName,
           org_id: orgId,
           room_name: roomName,
           start_time: startTimeUtc,
@@ -108,8 +111,14 @@ export class EventService {
         .single()
 
       if (eventError) {
+        // Handle unique constraint violation from Postgres (duplicate event name per org)
+        const code = (eventError as { code?: string }).code
+        const message = (eventError as { message?: string }).message || ''
+        if (code === '23505' || /duplicate key value|already exists/i.test(message)) {
+          return { data: null, error: 'An event with this name already exists in your organization.' }
+        }
         console.error('Error creating event:', eventError)
-        return { data: null, error: JSON.stringify(eventError) }
+        return { data: null, error: message || 'Failed to create event' }
       }
 
       // Insert event languages if any
@@ -139,6 +148,13 @@ export class EventService {
         error: error instanceof Error ? error.message : 'Failed to create event' 
       }
     }
+  }
+
+  /**
+   * Normalize event name for consistent comparison (case-insensitive, trimmed)
+   */
+  private static normalizeEventName(name: string): string {
+    return name.trim()
   }
 
   /**
