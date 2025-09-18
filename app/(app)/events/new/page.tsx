@@ -23,7 +23,6 @@ import toast from 'react-hot-toast'
 export default function CreateEventPage() {
   const router = useRouter()
   const user = useAuthStore(state => state.user)
-  const userState = useAuthStore(state => state.userState)
   const loading = useAuthStore(state => state.loading)
   const userOrganizations = useAuthStore(state => state.userOrganizations)
   
@@ -137,17 +136,6 @@ export default function CreateEventPage() {
     } catch {
       toast.error('An unexpected error occurred')
     }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Loading...</p>
-        </div>
-      </div>
-    )
   }
 
   if (loading || !orgId) {
