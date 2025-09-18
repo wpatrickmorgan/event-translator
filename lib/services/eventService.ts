@@ -1,5 +1,9 @@
 import { supabase } from '@/lib/supabase'
-import type { EventWithLanguages } from '@/lib/types/event'
+import type { EventWithLanguages, Event } from '@/lib/types/event'
+import type { CreateEventFormData } from '@/lib/schemas/event'
+import { OrganizationService } from './organizationService'
+import { slugify } from '@/lib/utils'
+import { fromZonedTime } from 'date-fns-tz'
 
 export class EventService {
   /**
@@ -32,6 +36,139 @@ export class EventService {
         error: error instanceof Error ? error.message : 'Failed to fetch events' 
       }
     }
+  }
+
+  /**
+   * Get event by ID
+   */
+  static async getEventById(eventId: string): Promise<{ data: Event | null; error: string | null }> {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('id', eventId)
+        .single()
+
+      if (error) {
+        console.error('Error fetching event:', error)
+        return { data: null, error: error.message }
+      }
+
+      return { data, error: null }
+    } catch (error) {
+      console.error('Error in getEventById:', error)
+      return { 
+        data: null, 
+        error: error instanceof Error ? error.message : 'Failed to fetch event' 
+      }
+    }
+  }
+
+  /**
+   * Create a new event
+   */
+  static async createEvent(
+    orgId: string,
+    userId: string,
+    input: CreateEventFormData,
+    createdAt = new Date()
+  ): Promise<{ data: Event | null; error: string | null }> {
+    try {
+      // Fetch organization to get slug
+      const { data: orgData, error: orgError } = await OrganizationService.getOrganization(orgId)
+      if (orgError || !orgData) {
+        return { data: null, error: 'Failed to fetch organization' }
+      }
+
+      // Generate room name slug
+      const roomName = this.generateRoomNameSlug(orgData.slug, input.name, createdAt)
+
+      // Convert start_time_local to UTC using user's timezone
+      const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      const startTimeUtc = fromZonedTime(input.start_time_local, userTimezone).toISOString()
+
+      // Generate join code if public
+      const joinCode = input.is_public ? this.generateJoinCode() : null
+
+      // Insert event
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .insert({
+          name: input.name,
+          org_id: orgId,
+          room_name: roomName,
+          start_time: startTimeUtc,
+          created_by: userId,
+          record_transcript: input.record_transcript,
+          is_public: input.is_public,
+          status: 'scheduled',
+          join_code: joinCode,
+        })
+        .select()
+        .single()
+
+      if (eventError) {
+        console.error('Error creating event:', eventError)
+        return { data: null, error: JSON.stringify(eventError) }
+      }
+
+      // Insert event languages if any
+      if (input.languages.length > 0) {
+        const eventLanguages = input.languages.map(lang => ({
+          event_id: eventData.id,
+          language_id: lang.language_id,
+          mode: this.getLanguageMode(lang.text, lang.audio),
+          voice_id: lang.voice_id,
+        }))
+
+        const { error: languagesError } = await supabase
+          .from('event_languages')
+          .insert(eventLanguages)
+
+        if (languagesError) {
+          console.error('Error creating event languages:', languagesError)
+          return { data: null, error: JSON.stringify(languagesError) }
+        }
+      }
+
+      return { data: eventData, error: null }
+    } catch (error) {
+      console.error('Error in createEvent:', error)
+      return { 
+        data: null, 
+        error: error instanceof Error ? error.message : 'Failed to create event' 
+      }
+    }
+  }
+
+  /**
+   * Generate room name slug: ${orgSlug}-${slugify(eventName)}-${YYYYMMDDHHmm}
+   */
+  private static generateRoomNameSlug(orgSlug: string, eventName: string, createdAt: Date): string {
+    const eventSlug = slugify(eventName)
+    const timestamp = createdAt.toISOString().replace(/[-:T.]/g, '').slice(0, 12)
+    return `${orgSlug}-${eventSlug}-${timestamp}`
+  }
+
+  /**
+   * Generate 6-character join code using non-ambiguous characters
+   */
+  private static generateJoinCode(length = 6): string {
+    const JOIN_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz2346789'
+    let out = ''
+    for (let i = 0; i < length; i++) {
+      out += JOIN_CODE_CHARS[Math.floor(Math.random() * JOIN_CODE_CHARS.length)]
+    }
+    return out
+  }
+
+  /**
+   * Convert text/audio booleans to language mode
+   */
+  private static getLanguageMode(text: boolean, audio: boolean): 'captions_only' | 'audio_only' | 'both' {
+    if (text && audio) return 'both'
+    if (text) return 'captions_only'
+    return 'audio_only'
   }
 
   // TODO: Add subscribeToEvents realtime helper for future phases

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import { ROLES } from '@/lib/constants/roles'
 import type { CreateOrganizationData, AuthResponse, OrganizationInsert, UserOrganization } from '@/lib/types/auth'
+import { slugify } from '@/lib/utils'
 
 export class OrganizationService {
   /**
@@ -12,7 +13,7 @@ export class OrganizationService {
   ): Promise<AuthResponse> {
     try {
       // Generate slug from organization name
-      const slug = this.generateSlug(organizationData.name)
+      const slug = slugify(organizationData.name)
 
       // Create organization
       const orgInsert: OrganizationInsert = {
@@ -56,16 +57,6 @@ export class OrganizationService {
    */
   static canCreateOrganization(userOrganizations: UserOrganization[]): boolean {
     return userOrganizations.length === 0
-  }
-
-  /**
-   * Generate URL-friendly slug from organization name
-   */
-  private static generateSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
   }
 
   /**

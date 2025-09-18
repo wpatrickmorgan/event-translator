@@ -1,16 +1,17 @@
 "use client"
 
 import { useQuery } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardAction } from '@/components/ui/card'
 import { EventsTable } from '@/components/events/events-table'
-import { CreateEventDialog } from '@/components/events/create-event-dialog'
 import { useAuthStore } from '@/lib/stores/authStore'
 import { UserService } from '@/lib/services/userService'
 import { EventService } from '@/lib/services/eventService'
 import { Loader2, Plus } from 'lucide-react'
 
 export default function EventsPage() {
+  const router = useRouter()
   const userOrganizations = useAuthStore(state => state.userOrganizations)
 
   // Get organization ID
@@ -66,12 +67,10 @@ export default function EventsPage() {
           <CardHeader>
             <CardTitle>Events</CardTitle>
             <CardAction>
-              <CreateEventDialog>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Event
-                </Button>
-              </CreateEventDialog>
+              <Button onClick={() => router.push('/events/new')}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Event
+              </Button>
             </CardAction>
           </CardHeader>
           <CardContent>
