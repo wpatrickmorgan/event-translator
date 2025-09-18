@@ -183,17 +183,62 @@ function EventControls({ eventId, currentStatus }: { eventId: string; currentSta
   const canPause = currentStatus === 'live'
   const canEnd = currentStatus === 'scheduled' || currentStatus === 'live' || currentStatus === 'paused'
 
+  const getStatusInfo = (status: EventStatus) => {
+    switch (status) {
+      case 'scheduled':
+        return { label: 'Waiting', color: 'bg-gray-500', textColor: 'text-gray-700' }
+      case 'live':
+        return { label: 'Running', color: 'bg-green-500', textColor: 'text-green-700' }
+      case 'paused':
+        return { label: 'Paused', color: 'bg-yellow-500', textColor: 'text-yellow-700' }
+      case 'ended':
+        return { label: 'Ended', color: 'bg-red-500', textColor: 'text-red-700' }
+      case 'canceled':
+        return { label: 'Canceled', color: 'bg-gray-500', textColor: 'text-gray-700' }
+      default:
+        return { label: 'Unknown', color: 'bg-gray-500', textColor: 'text-gray-700' }
+    }
+  }
+
+  const statusInfo = getStatusInfo(currentStatus)
+
   return (
-    <div className="flex gap-3">
-      <Button onClick={() => mutateAsync('live')} disabled={!canStart || isPending}>
-        Start
-      </Button>
-      <Button variant="secondary" onClick={() => mutateAsync('paused')} disabled={!canPause || isPending}>
-        Pause
-      </Button>
-      <Button variant="destructive" onClick={() => mutateAsync('ended')} disabled={!canEnd || isPending}>
-        End
-      </Button>
+    <div className="space-y-4">
+      {/* Status Indicator */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <div className={`w-3 h-3 rounded-full ${statusInfo.color}`} />
+          <span className={`text-sm font-medium ${statusInfo.textColor}`}>
+            Translation Status: {statusInfo.label}
+          </span>
+        </div>
+      </div>
+
+      {/* Control Buttons */}
+      <div className="flex gap-3">
+        <Button 
+          onClick={() => mutateAsync('live')} 
+          disabled={!canStart || isPending}
+          className="bg-green-600 hover:bg-green-700 text-white"
+        >
+          Start
+        </Button>
+        <Button 
+          variant="secondary" 
+          onClick={() => mutateAsync('paused')} 
+          disabled={!canPause || isPending}
+          className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border-yellow-300"
+        >
+          Pause
+        </Button>
+        <Button 
+          variant="destructive" 
+          onClick={() => mutateAsync('ended')} 
+          disabled={!canEnd || isPending}
+        >
+          End
+        </Button>
+      </div>
     </div>
   )
 }
