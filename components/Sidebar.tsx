@@ -109,7 +109,7 @@ export function Sidebar({
       {/* Desktop Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-30 hidden h-screen border-r bg-background transition-[width] duration-300 ease-in-out',
+          'fixed left-0 top-16 z-30 hidden h-[calc(100vh-4rem)] border-r bg-background transition-[width] duration-300 ease-in-out',
           'md:block',
           collapsed ? 'w-16' : 'w-64'
         )}

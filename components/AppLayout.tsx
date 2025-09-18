@@ -89,6 +89,14 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Fixed Header */}
+      <Header
+        onMenuToggle={handleMenuToggle}
+        userName={userName}
+        onEditProfile={handleEditProfile}
+        onLogout={handleLogout}
+      />
+
       {/* Sidebar */}
       <Sidebar
         collapsed={collapsed}
@@ -99,19 +107,11 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* Main Content Area */}
       <div
-        className="transition-[margin-left] duration-300 ease-in-out"
+        className="transition-[margin-left] duration-300 ease-in-out pt-16 min-h-[calc(100vh-4rem)]"
         style={{ marginLeft: `${sidebarWidth}px` }}
       >
-        {/* Header */}
-        <Header
-          onMenuToggle={handleMenuToggle}
-          userName={userName}
-          onEditProfile={handleEditProfile}
-          onLogout={handleLogout}
-        />
-
         {/* Page Content */}
-        <main className="flex-1">
+        <main className="h-full overflow-auto">
           {children}
         </main>
       </div>

@@ -37,7 +37,7 @@ export function Header({
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-background px-4">
+    <header className="fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between border-b bg-background px-4">
       {/* Left side - Hamburger menu and app name */}
       <div className="flex items-center gap-3">
         <Button
