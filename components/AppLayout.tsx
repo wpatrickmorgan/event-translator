@@ -108,9 +108,9 @@ export function AppLayout({ children }: AppLayoutProps) {
         onMobileOpenChange={setMobileOpen}
       />
 
-      {/* Main Content Area */}
-      <div 
-        className="fixed top-16 right-0 bottom-0 pl-0 md:pl-[var(--sidebar-width)] transition-[padding-left] duration-300 ease-in-out"
+           {/* Main Content Area */}
+           <div 
+        className="fixed left-0 top-16 right-0 bottom-0 pl-0 md:pl-[var(--sidebar-width)] transition-[padding-left] duration-300 ease-in-out"
         style={{ '--sidebar-width': sidebarWidth } as React.CSSProperties}
       >
         {/* Page Content */}
