@@ -4,7 +4,6 @@ import type { CreateEventFormData } from '@/lib/schemas/event'
 import { OrganizationService } from './organizationService'
 import { slugify } from '@/lib/utils'
 import { fromZonedTime } from 'date-fns-tz'
-import { ensureRoom } from '@/lib/livekit'
 
 export class EventService {
   /**
@@ -141,27 +140,14 @@ export class EventService {
         }
       }
 
-      // Build LiveKit room metadata now that event and languages exist
+      // Build LiveKit room metadata now that event and languages exist (server route to avoid client SDK usage)
       try {
-        const { data: langs } = await supabase
-          .from('event_languages')
-          .select('mode, voice_id, language:languages(code)')
-          .eq('event_id', eventData.id)
-
-        const outputs = (langs || []).map(l => ({
-          lang: l.language.code as string,
-          captions: l.mode === 'captions_only' || l.mode === 'both',
-          audio: l.mode === 'audio_only' || l.mode === 'both',
-          voiceId: l.voice_id ?? undefined,
-        }))
-
-        await ensureRoom(eventData.room_name, {
-          eventId: eventData.id,
-          orgId: orgId,
-          outputs,
+        await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/events/${eventData.id}/metadata`, {
+          method: 'POST',
+          cache: 'no-store',
         })
       } catch (e) {
-        console.warn('Failed to ensure room with metadata (non-fatal):', e)
+        console.warn('Failed to call metadata route (non-fatal):', e)
       }
 
       return { data: eventData, error: null }

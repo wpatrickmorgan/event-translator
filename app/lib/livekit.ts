@@ -1,6 +1,6 @@
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk'
 
-const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL!
+const livekitUrl = (process.env.NEXT_PUBLIC_LIVEKIT_URL || process.env.LIVEKIT_SERVER_URL)!
 const livekitApiKey = process.env.LIVEKIT_API_KEY!
 const livekitApiSecret = process.env.LIVEKIT_API_SECRET!
 
@@ -29,7 +29,13 @@ export function mintJoinToken(params: {
 }
 
 export async function ensureRoom(roomName: string, metadata?: unknown) {
-  const svc = new RoomServiceClient(livekitUrl, livekitApiKey, livekitApiSecret)
+  // RoomServiceClient expects HTTP(S). Convert wss:// to https:// if needed
+  const adminUrl = livekitUrl.startsWith('wss://')
+    ? `https://${livekitUrl.slice(6)}`
+    : livekitUrl.startsWith('ws://')
+    ? `http://${livekitUrl.slice(5)}`
+    : livekitUrl
+  const svc = new RoomServiceClient(adminUrl, livekitApiKey, livekitApiSecret)
   try {
     // Try to list rooms and check if our room exists
     const rooms = await svc.listRooms()
