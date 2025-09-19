@@ -45,7 +45,7 @@ export class PublicEventService {
       const event = {
         id: firstRow.event_id,
         name: firstRow.event_name,
-        is_public: typeof (firstRow as any).is_public === 'boolean' ? (firstRow as any).is_public : true,
+        is_public: 'is_public' in firstRow && typeof firstRow.is_public === 'boolean' ? firstRow.is_public : true,
         starts_at: firstRow.start_time,
         ends_at: firstRow.end_time,
       }

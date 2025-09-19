@@ -30,7 +30,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'Invalid or expired code' }, { status: 404 })
     }
 
-    const firstRow: any = data[0]
+    const firstRow = data[0] as {
+      event_id: string
+      room_name: string
+      is_public?: boolean
+      language_id: string
+      mode: 'audio_only' | 'captions_only' | 'both'
+    }
     const eventId: string | null = firstRow.event_id ?? null
     const roomName: string | null = firstRow.room_name ?? null
 
@@ -45,7 +51,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate that requested language belongs to this event via the RPC result set
-    const matchingLanguage = data.find((row: any) => row.language_id === languageId)
+    const matchingLanguage = data.find((row) => row.language_id === languageId)
     if (!matchingLanguage) {
       return NextResponse.json({ message: 'Language not available for this event' }, { status: 400 })
     }

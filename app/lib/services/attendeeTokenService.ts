@@ -3,6 +3,7 @@ export interface AttendeeTokenRequest {
   languageId: string
   enableAudio: boolean
   enableCaptions: boolean
+  name?: string
 }
 
 export interface AttendeeTokenResponse {
