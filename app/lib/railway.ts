@@ -10,9 +10,12 @@ async function gql<T>(query: string, variables?: Record<string, unknown>): Promi
     body: JSON.stringify({ query, variables }),
     cache: 'no-store',
   })
-  if (!resp.ok) throw new Error(`Railway error: ${resp.status}`)
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new Error(`Railway error: ${resp.status} ${text ? `- ${text}` : ''}`)
+  }
   const json = await resp.json()
-  if (json.errors) throw new Error(JSON.stringify(json.errors))
+  if (json.errors) throw new Error(`Railway GQL errors: ${JSON.stringify(json.errors)}`)
   return json.data
 }
 
