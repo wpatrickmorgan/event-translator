@@ -69,7 +69,7 @@ class TranslationBot:
         
         # State
         self.is_connected = False
-        self.audio_timeout = 30  # seconds to wait for audio
+        self.audio_timeout = 600  # seconds to wait for audio (10 minutes)
         
     def setup_google_credentials(self):
         """Setup Google Cloud credentials from JSON or file"""
@@ -622,6 +622,7 @@ class TranslationBot:
 class StartSessionBody(BaseModel):
     eventId: str
     roomName: str
+    metadata: Dict[str, Any] | None = None
 
 class StopSessionBody(BaseModel):
     roomName: str
@@ -636,6 +637,33 @@ class SessionSupervisor:
         if key in self.sessions and not self.sessions[key].done():
             return {"status": "already_running"}
         bot = TranslationBot(event_id=body.eventId, room_name=body.roomName)
+        # Apply metadata from request if provided
+        if body.metadata and isinstance(body.metadata, dict):
+            try:
+                src = body.metadata.get("sourceLanguage")
+                if isinstance(src, str) and src:
+                    bot.primary_lang = src
+                outputs = body.metadata.get("outputs")
+                if isinstance(outputs, list):
+                    t_targets: List[str] = []
+                    a_targets: List[str] = []
+                    for o in outputs:
+                        if not isinstance(o, dict):
+                            continue
+                        lang = o.get("lang")
+                        if not isinstance(lang, str) or not lang:
+                            continue
+                        if o.get("captions") is True:
+                            t_targets.append(lang)
+                        if o.get("audio") is True:
+                            a_targets.append(lang)
+                        voice = o.get("voice")
+                        if isinstance(voice, str) and voice:
+                            bot.voice_by_lang[lang] = voice
+                    bot.translation_targets = [l for l in dict.fromkeys(t_targets) if l != bot.primary_lang]
+                    bot.audio_targets = [l for l in dict.fromkeys(a_targets) if l != bot.primary_lang]
+            except Exception:
+                pass
         task = asyncio.create_task(bot.run())
         self.sessions[key] = task
         self.bots[key] = bot

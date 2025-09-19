@@ -62,6 +62,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       body: JSON.stringify({
         eventId,
         roomName: event.room_name,
+        metadata: {
+          outputs: (langs || []).map(l => ({
+            lang: l.language.code,
+            captions: l.mode === 'captions_only' || l.mode === 'both',
+            audio: l.mode === 'audio_only' || l.mode === 'both',
+            voice: (l as { voice_id?: string }).voice_id ?? undefined,
+          })),
+        },
       }),
     })
     if (!resp.ok) {
