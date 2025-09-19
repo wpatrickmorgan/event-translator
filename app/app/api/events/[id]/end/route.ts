@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
 import { closeRoom } from '@/lib/livekit'
-import { stopEventWorker } from '@/lib/railway'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: eventId } = await params
@@ -34,8 +33,6 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         body: JSON.stringify({ roomName: event.room_name }),
       })
     } catch {}
-  } else {
-    await stopEventWorker()
   }
 
   const { error: updErr } = await supabase

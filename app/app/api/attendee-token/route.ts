@@ -69,14 +69,14 @@ export async function POST(req: NextRequest) {
     // Create an anonymous attendee identity
     const identity = `attendee:${randomUUID()}`
 
-    // Public attendees should not be able to publish media; allow data channel
+    // Public attendees should only be able to subscribe
     const token = mintJoinToken({
       roomName,
       identity,
       name: body.name?.slice(0, 64),
       canPublish: false,
       canSubscribe: true,
-      canPublishData: true,
+      canPublishData: false,
     })
 
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 2).toISOString() // 2h window

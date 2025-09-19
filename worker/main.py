@@ -2,11 +2,9 @@
 """
 LiveKit Translation Bot Worker
 
-A minimal worker that:
-1. Joins a LiveKit room as a bot
-2. Subscribes to the main remote audio
-3. Streams audio to Google Cloud Speech-to-Text
-4. Publishes captions back via LiveKit data channel
+Joins a LiveKit room as a bot, streams audio to Google Cloud STT, publishes
+final-only original-language text, translates final results to configured targets,
+and optionally publishes per-language TTS audio tracks.
 """
 
 import asyncio
@@ -32,18 +30,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class TranslationBot:
-    def __init__(self, *, event_id: Optional[str] = None, room_name: Optional[str] = None, lang_codes_csv: Optional[str] = None, voice_codes_csv: Optional[str] = None):
+    def __init__(self, *, event_id: Optional[str] = None, room_name: Optional[str] = None):
         self.event_id = event_id or os.getenv("EVENT_ID", "")
         self.room_name = room_name or os.getenv("ROOM_NAME", "")
-        env_langs = lang_codes_csv if lang_codes_csv is not None else os.getenv("LANG_CODES", "en")
-        self.lang_codes = [c.strip() for c in env_langs.split(",") if c.strip()]
-        self.primary_lang = self.lang_codes[0] if self.lang_codes else "en"
-        self.target_langs: List[str] = self.lang_codes[1:] if len(self.lang_codes) > 1 else []
-        self.translation_targets: List[str] = list(self.target_langs)
-        self.audio_targets: List[str] = list(self.target_langs)
-        # Optional VOICE_CODES format: "es-ES:es-ES-Standard-A,fr-FR:fr-FR-Standard-A"
-        self.voice_codes_env = voice_codes_csv if voice_codes_csv is not None else os.getenv("VOICE_CODES", "")
-        self.voice_by_lang: Dict[str, str] = self._parse_voice_codes(self.voice_codes_env)
+        # Language configuration is sourced from room metadata; default fallback
+        self.primary_lang = "en-US"
+        self.translation_targets: List[str] = []
+        self.audio_targets: List[str] = []
+        self.voice_by_lang: Dict[str, str] = {}
         
         # LiveKit configuration
         self.livekit_url = os.getenv("LIVEKIT_URL", "")
@@ -103,20 +97,13 @@ class TranslationBot:
         else:
             logger.warning("No Google credentials found - STT will not work")
             
-    def _parse_voice_codes(self, voice_codes: str) -> Dict[str, str]:
-        mapping: Dict[str, str] = {}
-        if not voice_codes:
-            return mapping
-        pairs = [p.strip() for p in voice_codes.split(",") if p.strip()]
-        for p in pairs:
-            if ":" in p:
-                lang, voice = p.split(":", 1)
-                mapping[lang.strip()] = voice.strip()
-        return mapping
-    
     def _admin_base_url(self) -> str:
+        # Prefer explicit admin URL if provided
+        admin = os.getenv("LIVEKIT_SERVER_URL", "")
+        if admin:
+            return admin
+        # Fallback for older deployments using LIVEKIT_URL
         url = self.livekit_url or ""
-        # Convert ws(s) URL to http(s) admin base
         if url.startswith("wss://"):
             return "https://" + url[6:]
         if url.startswith("ws://"):
@@ -124,7 +111,7 @@ class TranslationBot:
         return url
     
     async def load_room_metadata(self):
-        """Attempt to load room metadata and derive languages/voices. Fallback to env if unavailable."""
+        """Load room metadata and derive source/targets; authoritative over env."""
         base_url = self._admin_base_url()
         try:
             client = lk_api.RoomServiceClient(base_url, self.livekit_api_key, self.livekit_api_secret)
@@ -136,7 +123,7 @@ class TranslationBot:
                 return None
             metadata_str = await asyncio.to_thread(_load)
             if not metadata_str:
-                logger.info("No room metadata found; using LANG_CODES fallback")
+                logger.info("No room metadata found; using defaults")
                 return
             try:
                 md = json.loads(metadata_str)
@@ -167,12 +154,11 @@ class TranslationBot:
                 # Ensure no duplicates and remove source language from targets
                 t_targets = [l for l in dict.fromkeys(t_targets) if l != self.primary_lang]
                 a_targets = [l for l in dict.fromkeys(a_targets) if l != self.primary_lang]
-                if t_targets or a_targets:
-                    self.translation_targets = t_targets
-                    self.audio_targets = a_targets
-                    logger.info(f"Using outputs from metadata. captions={self.translation_targets} audio={self.audio_targets}")
+                self.translation_targets = t_targets
+                self.audio_targets = a_targets
+                logger.info(f"Using outputs from metadata. captions={self.translation_targets} audio={self.audio_targets}")
         except Exception as e:
-            logger.info(f"Failed to load room metadata, using LANG_CODES fallback: {e}")
+            logger.info(f"Failed to load room metadata, continuing with defaults: {e}")
         
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def create_stt_client(self):
@@ -203,7 +189,7 @@ class TranslationBot:
             raise
             
     def create_stt_streaming_config(self):
-        """Create streaming STT configuration"""
+        """Create streaming STT configuration (final results only)."""
         self.streaming_config = speech.StreamingRecognitionConfig(
             config=speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
@@ -211,7 +197,7 @@ class TranslationBot:
                 language_code=self.primary_lang,
                 enable_automatic_punctuation=True,
             ),
-            interim_results=True,
+            interim_results=False,
         )
         logger.info(f"STT streaming config prepared for language: {self.primary_lang}")
         
@@ -228,7 +214,7 @@ class TranslationBot:
         return audio_int16.tobytes()
         
     async def process_stt(self, audio_q: asyncio.Queue):
-        """Run Google streaming_recognize consuming chunks from an async queue and publish captions."""
+        """Run Google streaming_recognize consuming chunks from an async queue and publish final-only text."""
         loop = asyncio.get_running_loop()
 
         def requests_iter():
@@ -247,38 +233,31 @@ class TranslationBot:
                     for result in response.results:
                         if not result.alternatives:
                             continue
+                        if not result.is_final:
+                            continue
                         transcript = result.alternatives[0].transcript.strip()
                         if not transcript:
                             continue
-                        is_final = result.is_final
                         self.seq_counter += 1
                         seq = self.seq_counter
-                        # Back-compat caption message
-                        caption_msg = {
-                            "type": "caption",
-                            "lang": self.primary_lang,
-                            "text": transcript,
-                            "isFinal": is_final,
-                        }
-                        asyncio.run_coroutine_threadsafe(self.publish_data(caption_msg), loop)
-                        # New original-language-text message
+                        # Original-language-text message (final only)
                         original_msg = {
                             "type": "original-language-text",
                             "lang": self.primary_lang,
                             "text": transcript,
-                            "isFinal": is_final,
+                            "isFinal": True,
                             "seq": seq,
                             "ts": int(time.time() * 1000),
                         }
                         asyncio.run_coroutine_threadsafe(self.publish_data(original_msg), loop)
-                        # Fan-out to translations
+                        # Fan-out to translations (final only)
                         if self.translation_targets and self.translate_client:
                             for tgt in self.translation_targets:
                                 asyncio.run_coroutine_threadsafe(
-                                    self.handle_translation_and_tts(transcript, self.primary_lang, tgt, is_final, seq),
+                                    self.handle_translation_and_tts(transcript, self.primary_lang, tgt, True, seq),
                                     loop,
                                 )
-                        logger.info(f"Caption: {transcript} (final: {is_final})")
+                        logger.info(f"Final transcript: {transcript}")
             except Exception as e:
                 logger.error(f"Error in streaming_recognize: {e}")
 
@@ -634,8 +613,6 @@ class TranslationBot:
 class StartSessionBody(BaseModel):
     eventId: str
     roomName: str
-    langCodesCsv: str | None = None
-    voiceCodesCsv: str | None = None
 
 class StopSessionBody(BaseModel):
     roomName: str
@@ -649,7 +626,7 @@ class SessionSupervisor:
         key = body.roomName
         if key in self.sessions and not self.sessions[key].done():
             return {"status": "already_running"}
-        bot = TranslationBot(event_id=body.eventId, room_name=body.roomName, lang_codes_csv=body.langCodesCsv, voice_codes_csv=body.voiceCodesCsv)
+        bot = TranslationBot(event_id=body.eventId, room_name=body.roomName)
         task = asyncio.create_task(bot.run())
         self.sessions[key] = task
         self.bots[key] = bot

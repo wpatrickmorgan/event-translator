@@ -33,7 +33,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       lang: l.language.code as string,
       captions: l.mode === 'captions_only' || l.mode === 'both',
       audio: l.mode === 'audio_only' || l.mode === 'both',
-      voiceId: l.voice_id ?? undefined,
+      voice: l.voice_id ?? undefined,
     }))
 
     await ensureRoom(event.room_name, {
