@@ -61,8 +61,8 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname
 
-  // Allow access to auth pages for unauthenticated users
-  if (!session && !pathname.startsWith('/auth')) {
+  // Allow access to auth pages and public join page for unauthenticated users
+  if (!session && !pathname.startsWith('/auth') && !pathname.startsWith('/join')) {
     const redirectUrl = req.nextUrl.clone()
     redirectUrl.pathname = '/auth'
     return NextResponse.redirect(redirectUrl)
