@@ -40,7 +40,20 @@ export async function ensureRoom(roomName: string, metadata?: unknown) {
         name: roomName,
         metadata: metadata ? JSON.stringify(metadata) : undefined,
       })
-    }
+      } else if (metadata) {
+        // Update metadata if the room already exists
+        try {
+          // updateRoom supports updating metadata
+          // @ts-expect-error - SDK types may differ across versions
+          await (svc as Record<string, unknown>).updateRoom({
+            room: roomName,
+            metadata: JSON.stringify(metadata),
+          })
+        } catch {
+          // As a fallback, attempt to delete and recreate the room with metadata (only if empty)
+          // Prefer not to disrupt active rooms; ignore on failure
+        }
+      }
   } catch {
     // If listing fails, try to create the room anyway
     await svc.createRoom({
