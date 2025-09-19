@@ -699,9 +699,9 @@ async def start_session(body: StartSessionBody):
 async def stop_session(body: StopSessionBody):
     return await supervisor.stop(body.roomName)
 
-async def main():
+def main():
     """If launched directly, run as a supervisor HTTP server."""
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
