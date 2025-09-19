@@ -56,11 +56,34 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       ? 'both'
       : (langs || []).some(l => l.mode === 'audio_only') ? 'audio' : 'captions'
 
-  try {
-    await startEventWorker({ eventId, roomName: event.room_name, langCodesCsv: langCodes, mode })
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to start worker'
-    return NextResponse.json({ error: message }, { status: 500 })
+  const workerUrl = process.env.WORKER_PUBLIC_URL
+  if (workerUrl) {
+    try {
+      const resp = await fetch(`${workerUrl.replace(/\/$/, '')}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({
+          eventId,
+          roomName: event.room_name,
+          langCodesCsv: langCodes,
+        }),
+      })
+      if (!resp.ok) {
+        const text = await resp.text()
+        return NextResponse.json({ error: `Worker start failed: ${resp.status} ${text}` }, { status: 500 })
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to contact worker'
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  } else {
+    try {
+      await startEventWorker({ eventId, roomName: event.room_name, langCodesCsv: langCodes, mode })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to start worker'
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
   }
 
   return NextResponse.json({ ok: true })

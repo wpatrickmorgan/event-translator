@@ -17,6 +17,9 @@ import time
 from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
+from fastapi import FastAPI
+from pydantic import BaseModel
+import uvicorn
 
 from livekit import rtc, api as lk_api
 from livekit.rtc import DataPacketKind
@@ -29,16 +32,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class TranslationBot:
-    def __init__(self):
-        self.event_id = os.getenv("EVENT_ID", "")
-        self.room_name = os.getenv("ROOM_NAME", "")
-        self.lang_codes = [c.strip() for c in os.getenv("LANG_CODES", "en").split(",") if c.strip()]
+    def __init__(self, *, event_id: Optional[str] = None, room_name: Optional[str] = None, lang_codes_csv: Optional[str] = None, voice_codes_csv: Optional[str] = None):
+        self.event_id = event_id or os.getenv("EVENT_ID", "")
+        self.room_name = room_name or os.getenv("ROOM_NAME", "")
+        env_langs = lang_codes_csv if lang_codes_csv is not None else os.getenv("LANG_CODES", "en")
+        self.lang_codes = [c.strip() for c in env_langs.split(",") if c.strip()]
         self.primary_lang = self.lang_codes[0] if self.lang_codes else "en"
         self.target_langs: List[str] = self.lang_codes[1:] if len(self.lang_codes) > 1 else []
         self.translation_targets: List[str] = list(self.target_langs)
         self.audio_targets: List[str] = list(self.target_langs)
         # Optional VOICE_CODES format: "es-ES:es-ES-Standard-A,fr-FR:fr-FR-Standard-A"
-        self.voice_codes_env = os.getenv("VOICE_CODES", "")
+        self.voice_codes_env = voice_codes_csv if voice_codes_csv is not None else os.getenv("VOICE_CODES", "")
         self.voice_by_lang: Dict[str, str] = self._parse_voice_codes(self.voice_codes_env)
         
         # LiveKit configuration
@@ -627,10 +631,77 @@ class TranslationBot:
                 
         logger.info("Cleanup complete")
 
+class StartSessionBody(BaseModel):
+    eventId: str
+    roomName: str
+    langCodesCsv: str | None = None
+    voiceCodesCsv: str | None = None
+
+class StopSessionBody(BaseModel):
+    roomName: str
+
+class SessionSupervisor:
+    def __init__(self) -> None:
+        self.sessions: Dict[str, asyncio.Task] = {}
+        self.bots: Dict[str, TranslationBot] = {}
+
+    async def start(self, body: StartSessionBody):
+        key = body.roomName
+        if key in self.sessions and not self.sessions[key].done():
+            return {"status": "already_running"}
+        bot = TranslationBot(event_id=body.eventId, room_name=body.roomName, lang_codes_csv=body.langCodesCsv, voice_codes_csv=body.voiceCodesCsv)
+        task = asyncio.create_task(bot.run())
+        self.sessions[key] = task
+        self.bots[key] = bot
+        return {"status": "started"}
+
+    async def stop(self, room_name: str):
+        key = room_name
+        task = self.sessions.get(key)
+        bot = self.bots.get(key)
+        if not task:
+            return {"status": "not_found"}
+        try:
+            if bot:
+                await bot.cleanup()
+        except Exception:
+            pass
+        try:
+            task.cancel()
+        except Exception:
+            pass
+        self.sessions.pop(key, None)
+        self.bots.pop(key, None)
+        return {"status": "stopped"}
+
+    def list(self):
+        out = []
+        for k, t in self.sessions.items():
+            out.append({"roomName": k, "running": not t.done()})
+        return out
+
+app = FastAPI()
+supervisor = SessionSupervisor()
+
+@app.get("/health")
+async def health():
+    return {"ok": True}
+
+@app.get("/sessions")
+async def sessions():
+    return supervisor.list()
+
+@app.post("/start")
+async def start_session(body: StartSessionBody):
+    return await supervisor.start(body)
+
+@app.post("/stop")
+async def stop_session(body: StopSessionBody):
+    return await supervisor.stop(body.roomName)
+
 async def main():
-    """Main entry point"""
-    bot = TranslationBot()
-    await bot.run()
+    """If launched directly, run as a supervisor HTTP server."""
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 if __name__ == "__main__":
     asyncio.run(main())

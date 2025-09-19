@@ -24,7 +24,19 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!membership || membership.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   await closeRoom(event.room_name)
-  await stopEventWorker()
+  const workerUrl = process.env.WORKER_PUBLIC_URL
+  if (workerUrl) {
+    try {
+      await fetch(`${workerUrl.replace(/\/$/, '')}/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ roomName: event.room_name }),
+      })
+    } catch {}
+  } else {
+    await stopEventWorker()
+  }
 
   const { error: updErr } = await supabase
     .from('events')
