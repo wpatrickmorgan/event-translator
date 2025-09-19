@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Loader2 } from 'lucide-react'
+import { AttendeeLive } from '@/components/attendee-live'
 
 function JoinPageContent() {
   const router = useRouter()
@@ -31,6 +32,7 @@ function JoinPageContent() {
     setStreams,
     setJoining,
     setJoinAuth,
+    livekitUrl,
   } = useAttendeeStore()
 
   const [loading, setLoading] = useState(false)
@@ -208,24 +210,75 @@ function JoinPageContent() {
     )
   }
 
-  // Show success state (when user has joined and been redirected)
+  // Show live view when joined
   if (room && token) {
+    const lkUrl = livekitUrl || process.env.NEXT_PUBLIC_LIVEKIT_URL || ''
     return (
-      <div className="mx-auto max-w-md p-6">
+      <div className="mx-auto max-w-2xl p-6 space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Successfully Joined!</CardTitle>
-            <CardDescription>You are now connected to the event</CardDescription>
+            <CardTitle>Live Translation</CardTitle>
+            <CardDescription>Connected to room {room}</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-green-600 bg-green-50 p-3 rounded mb-4">
-              Room: {room}
-            </div>
-            <Button onClick={() => router.push('/join')} variant="outline" className="w-full">
-              Join Another Event
-            </Button>
+            {lkUrl ? (
+              <AttendeeLive roomName={room} token={token} url={lkUrl} />
+            ) : (
+              <div className="text-sm text-red-600">Missing LiveKit URL configuration.</div>
+            )}
+            {eventData && (
+              <div className="mt-6 space-y-4">
+                <div className="text-sm font-medium">Language</div>
+                <div className="space-y-2">
+                  {eventData.languages.map((language) => (
+                    <div key={language.id} className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        id={`live-lang-${language.id}`}
+                        name="live-language"
+                        value={language.id}
+                        checked={selectedLanguageId === language.id}
+                        onChange={(e) => setSelectedLanguageId(e.target.value)}
+                        className="h-4 w-4"
+                      />
+                      <label htmlFor={`live-lang-${language.id}`} className="text-sm">
+                        {language.name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-4">
+                  <div className="text-sm font-medium">Stream Options</div>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="live-audio-toggle" className="text-sm">
+                      Enable Audio
+                    </label>
+                    <Switch
+                      id="live-audio-toggle"
+                      checked={enableAudio}
+                      onCheckedChange={(checked) => setStreams(checked, enableCaptions)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="live-captions-toggle" className="text-sm">
+                      Enable Captions
+                    </label>
+                    <Switch
+                      id="live-captions-toggle"
+                      checked={enableCaptions}
+                      onCheckedChange={(checked) => setStreams(enableAudio, checked)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
+        <div className="mx-auto max-w-md">
+          <Button onClick={() => router.push('/join')} variant="outline" className="w-full">
+            Leave
+          </Button>
+        </div>
       </div>
     )
   }

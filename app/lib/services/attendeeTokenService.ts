@@ -10,6 +10,7 @@ export interface AttendeeTokenResponse {
   token: string
   roomName: string
   expiresAt: string
+  url?: string
 }
 
 export class AttendeeTokenService {

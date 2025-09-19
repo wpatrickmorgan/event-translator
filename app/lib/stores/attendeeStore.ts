@@ -20,6 +20,7 @@ interface AttendeeStore {
   token: string | null
   roomName: string | null
   expiresAt: string | null
+  livekitUrl?: string | null
   
   // State setters
   setEventData: (data: PublicEventData | null) => void
@@ -40,6 +41,7 @@ export const useAttendeeStore = create<AttendeeStore>((set) => ({
   token: null,
   roomName: null,
   expiresAt: null,
+  livekitUrl: null,
 
   // State setters
   setEventData: (data) => set({ eventData: data }),
@@ -68,6 +70,7 @@ export const useAttendeeStore = create<AttendeeStore>((set) => ({
     token: auth.token,
     roomName: auth.roomName,
     expiresAt: auth.expiresAt,
+    livekitUrl: auth.url ?? null,
   }),
   
   reset: () => set({
@@ -79,5 +82,6 @@ export const useAttendeeStore = create<AttendeeStore>((set) => ({
     token: null,
     roomName: null,
     expiresAt: null,
+  livekitUrl: null,
   }),
 }))

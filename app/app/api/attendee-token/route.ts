@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       token,
       roomName,
-      expiresAt,
+    expiresAt,
+    url: process.env.NEXT_PUBLIC_LIVEKIT_URL || process.env.LIVEKIT_SERVER_URL,
     })
   } catch {
     return NextResponse.json({ message: 'Failed to issue attendee token' }, { status: 500 })
