@@ -11,6 +11,7 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
 
   const roomRef = useRef<Room | null>(null)
   const trackRef = useRef<LocalAudioTrack | null>(null)
+  const hasConnectedRef = useRef(false)
 
   const meterRaf = useRef<number | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -75,7 +76,8 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
     let cancelled = false
 
     async function ensureConnectedAndMaybePublish() {
-      const shouldConnect = status === 'live' || status === 'paused'
+      // Connect when event is live; remain connected during paused
+      const shouldConnect = status === 'live' || (status === 'paused' && hasConnectedRef.current)
       if (!shouldConnect) return
 
       if (!roomRef.current) {
@@ -88,8 +90,9 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
           const { token, url } = await res.json()
           if (cancelled) return
           const room = new Room()
-          await room.connect(url, token)
+          await room.connect(typeof url === 'string' ? url : String(url), typeof token === 'string' ? token : String(token), { autoSubscribe: true })
           roomRef.current = room
+          hasConnectedRef.current = true
 
           room.on(RoomEvent.Disconnected, () => {
             stopMeter()
@@ -137,6 +140,7 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
         }
       } catch {}
       roomRef.current = null
+      hasConnectedRef.current = false
     }
 
     if (status === 'live' || status === 'paused') {
