@@ -28,11 +28,21 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .select('mode, language:languages(code, name_en, name_native)')
     .eq('event_id', eventId)
 
-  await ensureRoom(event.room_name, {
-    eventId,
-    orgId: event.org_id,
-    languages: (langs || []).map(l => ({ code: l.language.code, mode: l.mode })),
-  })
+  // Ensure room metadata (outputs) before starting worker
+  try {
+    await ensureRoom(event.room_name, {
+      eventId,
+      orgId: event.org_id,
+      outputs: (langs || []).map(l => ({
+        lang: l.language.code,
+        captions: l.mode === 'captions_only' || l.mode === 'both',
+        audio: l.mode === 'audio_only' || l.mode === 'both',
+      })),
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to ensure room metadata'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 
   const { error: updErr } = await supabase
     .from('events')
@@ -46,7 +56,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       ? 'both'
       : (langs || []).some(l => l.mode === 'audio_only') ? 'audio' : 'captions'
 
-  await startEventWorker({ eventId, roomName: event.room_name, langCodesCsv: langCodes, mode })
+  try {
+    await startEventWorker({ eventId, roomName: event.room_name, langCodesCsv: langCodes, mode })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to start worker'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 
   return NextResponse.json({ ok: true })
 }
