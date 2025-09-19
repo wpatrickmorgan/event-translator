@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EventService } from '@/lib/services/eventService'
+import { AdminMicControls } from '@/components/admin-mic-controls'
 import { Loader2, ArrowLeft, Calendar, Users, Globe, Shield } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -147,6 +148,9 @@ export default function EventDetailPage() {
         <Card className="mt-6">
           <CardContent>
             <EventControls eventId={event.id} currentStatus={event.status} />
+            <div className="mt-4">
+              <AdminMicControls eventId={event.id} status={event.status} />
+            </div>
           </CardContent>
         </Card>
       </div>
