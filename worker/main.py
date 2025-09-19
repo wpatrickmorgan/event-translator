@@ -97,68 +97,7 @@ class TranslationBot:
         else:
             logger.warning("No Google credentials found - STT will not work")
             
-    def _admin_base_url(self) -> str:
-        # Prefer explicit admin URL if provided
-        admin = os.getenv("LIVEKIT_SERVER_URL", "")
-        if admin:
-            return admin
-        # Fallback for older deployments using LIVEKIT_URL
-        url = self.livekit_url or ""
-        if url.startswith("wss://"):
-            return "https://" + url[6:]
-        if url.startswith("ws://"):
-            return "http://" + url[5:]
-        return url
     
-    async def load_room_metadata(self):
-        """Load room metadata and derive source/targets; authoritative over env."""
-        base_url = self._admin_base_url()
-        try:
-            client = lk_api.RoomServiceClient(base_url, self.livekit_api_key, self.livekit_api_secret)
-            def _load():
-                rooms = client.list_rooms()
-                for r in rooms:
-                    if r.name == self.room_name:
-                        return getattr(r, 'metadata', None)
-                return None
-            metadata_str = await asyncio.to_thread(_load)
-            if not metadata_str:
-                logger.info("No room metadata found; using defaults")
-                return
-            try:
-                md = json.loads(metadata_str)
-            except Exception:
-                logger.warning("Room metadata is not valid JSON; ignoring")
-                return
-            src = md.get("sourceLanguage")
-            if isinstance(src, str) and src:
-                self.primary_lang = src
-            outputs = md.get("outputs")
-            if isinstance(outputs, list) and outputs:
-                t_targets: List[str] = []
-                a_targets: List[str] = []
-                for o in outputs:
-                    try:
-                        lang = o.get("lang")
-                        if not isinstance(lang, str) or not lang:
-                            continue
-                        if o.get("captions") is True:
-                            t_targets.append(lang)
-                        if o.get("audio") is True:
-                            a_targets.append(lang)
-                        voice = o.get("voice")
-                        if isinstance(voice, str) and voice:
-                            self.voice_by_lang[lang] = voice
-                    except Exception:
-                        continue
-                # Ensure no duplicates and remove source language from targets
-                t_targets = [l for l in dict.fromkeys(t_targets) if l != self.primary_lang]
-                a_targets = [l for l in dict.fromkeys(a_targets) if l != self.primary_lang]
-                self.translation_targets = t_targets
-                self.audio_targets = a_targets
-                logger.info(f"Using outputs from metadata. captions={self.translation_targets} audio={self.audio_targets}")
-        except Exception as e:
-            logger.info(f"Failed to load room metadata, continuing with defaults: {e}")
         
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def create_stt_client(self):
@@ -486,8 +425,7 @@ class TranslationBot:
             
             # Connect to room
             await self.connect_to_room()
-            # Try to load room metadata for outputs
-            await self.load_room_metadata()
+            # Metadata is supplied via /start; no LiveKit metadata fetch
             
             # Prepare TTS publishing per target language
             for lang in self.audio_targets:
