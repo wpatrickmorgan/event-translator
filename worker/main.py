@@ -449,11 +449,20 @@ class TranslationBot:
             # Connect to room
             self.room = rtc.Room()
 
-            # Set up event handlers
-            self.room.on("track_subscribed", self.on_track_subscribed)
-            self.room.on("track_unsubscribed", self.on_track_unsubscribed)
-            self.room.on("participant_connected", self.on_participant_connected)
-            self.room.on("participant_disconnected", self.on_participant_disconnected)
+            # Set up event handlers using sync wrappers that schedule async callbacks
+            def _track_subscribed(track, publication, participant):
+                asyncio.create_task(self.on_track_subscribed(track, publication, participant))
+            def _track_unsubscribed(track, publication, participant):
+                asyncio.create_task(self.on_track_unsubscribed(track, publication, participant))
+            def _participant_connected(participant):
+                asyncio.create_task(self.on_participant_connected(participant))
+            def _participant_disconnected(participant):
+                asyncio.create_task(self.on_participant_disconnected(participant))
+
+            self.room.on("track_subscribed", _track_subscribed)
+            self.room.on("track_unsubscribed", _track_unsubscribed)
+            self.room.on("participant_connected", _participant_connected)
+            self.room.on("participant_disconnected", _participant_disconnected)
 
             await self.room.connect(self.livekit_url, jwt_token)
             self.is_connected = True
