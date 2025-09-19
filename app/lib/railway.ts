@@ -26,20 +26,36 @@ export async function startEventWorker(vars: {
   mode: 'captions' | 'audio' | 'both'
 }) {
   const serviceId = process.env.WORKER_SERVICE_ID!
+  const projectId = process.env.RAILWAY_PROJECT_ID
+  const environmentId = process.env.RAILWAY_ENVIRONMENT_ID
 
-  await gql(`
-    mutation UpsertVariables($serviceId: String!, $vars: [VariableInput!]!) {
-      variablesUpsert(serviceId: $serviceId, variables: $vars) { id }
-    }
-  `, {
-    serviceId,
-    vars: [
-      { name: 'EVENT_ID', value: vars.eventId },
-      { name: 'ROOM_NAME', value: vars.roomName },
-      { name: 'LANG_CODES', value: vars.langCodesCsv },
-      { name: 'MODE', value: vars.mode },
-    ],
-  })
+  const variableInputs = [
+    { name: 'EVENT_ID', value: vars.eventId, serviceId },
+    { name: 'ROOM_NAME', value: vars.roomName, serviceId },
+    { name: 'LANG_CODES', value: vars.langCodesCsv, serviceId },
+    { name: 'MODE', value: vars.mode, serviceId },
+  ]
+
+  if (projectId && environmentId) {
+    await gql(`
+      mutation UpsertVariables($projectId: String!, $environmentId: String!, $vars: [VariableInput!]!) {
+        variablesUpsert(projectId: $projectId, environmentId: $environmentId, variables: $vars) { id }
+      }
+    `, {
+      projectId,
+      environmentId,
+      vars: variableInputs,
+    })
+  } else {
+    await gql(`
+      mutation UpsertVariables($serviceId: String!, $vars: [VariableInput!]!) {
+        variablesUpsert(serviceId: $serviceId, variables: $vars) { id }
+      }
+    `, {
+      serviceId,
+      vars: variableInputs,
+    })
+  }
 
   await gql(`
     mutation Scale($serviceId: String!, $replicas: Int!) {
