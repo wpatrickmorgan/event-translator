@@ -460,34 +460,34 @@ class TranslationBot:
 
             async def feed_audio():
                 try:
-                    # Prefer async context manager to ensure proper stream cleanup
+                    # Use standard context manager for AudioStream; iterate events asynchronously
                     try:
-                        async with rtc.AudioStream(audio_track) as stream:
+                        with rtc.AudioStream(audio_track) as stream:
                             async for event in stream:
                                 frame = event.frame
-                                # frame.data might be ndarray or bytes; normalize to float32 ndarray
                                 pcm = frame.data
                                 if isinstance(pcm, (bytes, bytearray)):
                                     pcm = np.frombuffer(pcm, dtype=np.float32)
-                                # Downmix to mono
                                 if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
                                     pcm = np.mean(pcm, axis=1)
                                 pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
                                 linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
                                 await audio_q.put(linear16)
-                    except AttributeError:
-                        # Fallback for older SDKs without context manager support
-                        stream = rtc.AudioStream.from_track(audio_track)  # type: ignore[attr-defined]
-                        async for event in stream:
-                            frame = event.frame
-                            pcm = frame.data
-                            if isinstance(pcm, (bytes, bytearray)):
-                                pcm = np.frombuffer(pcm, dtype=np.float32)
-                            if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
-                                pcm = np.mean(pcm, axis=1)
-                            pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
-                            linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
-                            await audio_q.put(linear16)
+                    except (AttributeError, TypeError):
+                        # Fallback for SDK variants without context manager support
+                        stream = getattr(rtc.AudioStream, 'from_track', None)
+                        if callable(stream):
+                            s = stream(audio_track)
+                            async for event in s:
+                                frame = event.frame
+                                pcm = frame.data
+                                if isinstance(pcm, (bytes, bytearray)):
+                                    pcm = np.frombuffer(pcm, dtype=np.float32)
+                                if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
+                                    pcm = np.mean(pcm, axis=1)
+                                pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
+                                linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
+                                await audio_q.put(linear16)
                 except asyncio.CancelledError:
                     return
 
