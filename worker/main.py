@@ -16,8 +16,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from livekit import api as lk_api
-from livekit.agents import rtc
+from livekit import rtc
 from livekit.agents import cli, WorkerOptions, JobContext
 from google.cloud import speech
 from google.cloud import texttospeech
