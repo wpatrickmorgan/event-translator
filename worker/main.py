@@ -575,24 +575,28 @@ async def entrypoint(ctx: JobContext) -> None:
     room_name: Optional[str] = getattr(getattr(ctx, "job", None), "room_name", None)
 
     # Connect to the room using Agents context (identity handled by framework)
-    room = cast(rtc.Room, await ctx.connect())
+    _room = await ctx.connect()
+    room_obj: Optional[rtc.Room] = _room if isinstance(_room, rtc.Room) else cast(Optional[rtc.Room], getattr(ctx, "room", None))
+    if room_obj is None:
+        logger.error("ctx.connect did not yield a room; aborting job")
+        return
 
     # Register bot and parse metadata
-    bot = TranslationBot(event_id=room_name or room.name or "", room_name=room.name)
-    bot.room = room
+    bot = TranslationBot(event_id=room_name or room_obj.name or "", room_name=room_obj.name)
+    bot.room = room_obj
     bot.is_connected = True
 
     # Register async event handlers
-    room.on("track_subscribed", bot.on_track_subscribed)
-    room.on("track_unsubscribed", bot.on_track_unsubscribed)
-    room.on("participant_connected", bot.on_participant_connected)
-    room.on("participant_disconnected", bot.on_participant_disconnected)
+    room_obj.on("track_subscribed", bot.on_track_subscribed)
+    room_obj.on("track_unsubscribed", bot.on_track_unsubscribed)
+    room_obj.on("participant_connected", bot.on_participant_connected)
+    room_obj.on("participant_disconnected", bot.on_participant_disconnected)
 
     # Parse room metadata if present
     metadata_obj: Dict[str, Any] = {}
     try:
-        if isinstance(room.metadata, str) and room.metadata:
-            metadata_obj = json.loads(room.metadata)
+        if isinstance(room_obj.metadata, str) and room_obj.metadata:
+            metadata_obj = json.loads(room_obj.metadata)
     except Exception:
         metadata_obj = {}
 
