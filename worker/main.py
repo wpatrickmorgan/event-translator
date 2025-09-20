@@ -91,13 +91,13 @@ class TranslationWorker:
         # Initialize Google STT
         if credentials_info:
             self.stt = google.STT(
-                model="chirp",
+                model="latest_long",
                 languages=[self.primary_lang],
                 credentials_info=credentials_info
             )
         else:
             self.stt = google.STT(
-                model="chirp", 
+                model="latest_long", 
                 languages=[self.primary_lang]
             )
         
@@ -457,6 +457,9 @@ async def entrypoint(ctx: JobContext) -> None:
     primary_lang = src_lang or "en-US"
     translation_targets = [l for l in dict.fromkeys(t_targets) if l and l != primary_lang]
     audio_targets = [l for l in dict.fromkeys(a_targets) if l and l != primary_lang]
+    
+    logger.info(f"Parsed metadata - src_lang: {src_lang}, t_targets: {t_targets}, a_targets: {a_targets}")
+    logger.info(f"Final config - primary_lang: {primary_lang}, translation_targets: {translation_targets}, audio_targets: {audio_targets}")
     
     # Create translation worker
     worker = TranslationWorker(
