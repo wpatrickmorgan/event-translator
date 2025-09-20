@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Iterable, Iterator, cast
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -53,9 +53,9 @@ class TranslationBot:
         # Audio processing
         self.sample_rate = 48000
         self.channels = 1  # mono
-        self.audio_buffer = []
-        self.stt_client = None
-        self.streaming_config = None
+        self.audio_buffer: List[bytes] = []
+        self.stt_client: Optional[speech.SpeechClient] = None
+        self.streaming_config: Optional[speech.StreamingRecognitionConfig] = None
         self.translate_client: Optional[translate.TranslationServiceClient] = None
         self.tts_client: Optional[texttospeech.TextToSpeechClient] = None
         self.room: Optional[rtc.Room] = None
@@ -73,7 +73,7 @@ class TranslationBot:
         self.is_connected = False
         self.audio_timeout = 600  # seconds to wait for audio (10 minutes)
         
-    def setup_google_credentials(self):
+    def setup_google_credentials(self) -> None:
         """Setup Google Cloud credentials from JSON or file"""
         if self.google_credentials_json:
             # Write JSON credentials to file
@@ -102,7 +102,7 @@ class TranslationBot:
     
         
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_stt_client(self):
+    def create_stt_client(self) -> None:
         """Create Google Cloud Speech-to-Text client with retry"""
         try:
             self.stt_client = speech.SpeechClient()
@@ -112,7 +112,7 @@ class TranslationBot:
             raise
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_translate_client(self):
+    def create_translate_client(self) -> None:
         try:
             self.translate_client = translate.TranslationServiceClient()
             logger.info("Google Cloud Translate client created successfully")
@@ -121,7 +121,7 @@ class TranslationBot:
             raise
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_tts_client(self):
+    def create_tts_client(self) -> None:
         try:
             self.tts_client = texttospeech.TextToSpeechClient()
             logger.info("Google Cloud TTS client created successfully")
@@ -129,7 +129,7 @@ class TranslationBot:
             logger.error(f"Failed to create TTS client: {e}")
             raise
             
-    def create_stt_streaming_config(self):
+    def create_stt_streaming_config(self) -> None:
         """Create streaming STT configuration (final results only)."""
         self.streaming_config = speech.StreamingRecognitionConfig(
             config=speech.RecognitionConfig(
@@ -154,21 +154,28 @@ class TranslationBot:
         # Convert to little-endian bytes
         return audio_int16.tobytes()
         
-    async def process_stt(self, audio_q: asyncio.Queue):
+    async def process_stt(self, audio_q: asyncio.Queue[Optional[bytes]]) -> None:
         """Run Google streaming_recognize consuming chunks from an async queue and publish final-only text."""
         loop = asyncio.get_running_loop()
 
-        def requests_iter():
+        def requests_iter() -> Iterator[speech.StreamingRecognizeRequest]:
+            cfg = self.streaming_config
+            if cfg is not None:
+                # Send initial config request per API
+                yield speech.StreamingRecognizeRequest(streaming_config=cfg)
             while True:
                 # Bridge async queue to sync iterator
-                chunk = asyncio.run_coroutine_threadsafe(audio_q.get(), loop).result()
+                chunk: Optional[bytes] = asyncio.run_coroutine_threadsafe(audio_q.get(), loop).result()
                 if chunk is None:
                     break
                 yield speech.StreamingRecognizeRequest(audio_content=chunk)
 
-        def run_stream():
+        def run_stream() -> None:
             try:
-                for response in self.stt_client.streaming_recognize(self.streaming_config, requests_iter()):
+                client = self.stt_client
+                if client is None:
+                    return
+                for response in client.streaming_recognize(requests=requests_iter()):
                     if not response.results:
                         continue
                     for result in response.results:
@@ -205,21 +212,18 @@ class TranslationBot:
         # Run the blocking stream in a worker thread
         await asyncio.to_thread(run_stream)
             
-    async def publish_data(self, data_obj: Dict[str, Any]):
+    async def publish_data(self, data_obj: Dict[str, Any]) -> None:
         """Publish JSON to LiveKit data channel (reliable)."""
         if not self.room or not self.is_connected:
             return
             
         try:
             data = json.dumps(data_obj).encode('utf-8')
-            await self.room.local_participant.publish_data(
-                data,
-                kind=rtc.DataPacketKind.RELIABLE,
-            )
+            await self.room.local_participant.publish_data(data)
         except Exception as e:
             logger.error(f"Error publishing data: {e}")
 
-    async def handle_translation_and_tts(self, text: str, src_lang: str, tgt_lang: str, is_final: bool, seq: int):
+    async def handle_translation_and_tts(self, text: str, src_lang: str, tgt_lang: str, is_final: bool, seq: int) -> None:
         """Translate text and optionally synthesize TTS for final results."""
         try:
             translated = await self.translate_text(text, src_lang, tgt_lang)
@@ -251,7 +255,7 @@ class TranslationBot:
         if not self.translate_client or not self.gcp_project_id:
             return text
         parent = f"projects/{self.gcp_project_id}/locations/global"
-        def _translate():
+        def _translate() -> str:
             request = translate.TranslateTextRequest(
                 parent=parent,
                 contents=[text],
@@ -259,13 +263,16 @@ class TranslationBot:
                 source_language_code=src_lang,
                 target_language_code=tgt_lang,
             )
-            resp = self.translate_client.translate_text(request=request)
+            client = self.translate_client
+            assert client is not None
+            resp = client.translate_text(request=request)
             return resp.translations[0].translated_text if resp.translations else text
         return await asyncio.to_thread(_translate)
 
-    async def enqueue_tts_audio(self, text: str, tgt_lang: str, seq: int):
+    async def enqueue_tts_audio(self, text: str, tgt_lang: str, seq: int) -> None:
         """Synthesize TTS with Google TTS and enqueue raw LINEAR16 bytes."""
-        if not self.tts_client:
+        client = self.tts_client
+        if not client:
             return
         voice_name = self.voice_by_lang.get(tgt_lang)
         def _synthesize() -> bytes:
@@ -279,7 +286,7 @@ class TranslationBot:
                 speaking_rate=1.0,
             )
             synthesis_input = texttospeech.SynthesisInput(text=text)
-            response = self.tts_client.synthesize_speech(
+            response = client.synthesize_speech(
                 input=synthesis_input,
                 voice=voice_params,
                 audio_config=audio_config,
@@ -346,20 +353,20 @@ class TranslationBot:
         logger.warning(f"No audio track found within {self.audio_timeout} seconds")
         return None
         
-    async def on_track_subscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
+    async def on_track_subscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant) -> None:
         """Handle track subscription"""
         if track.kind == rtc.TrackKind.KIND_AUDIO and not participant.identity.startswith("translation-bot:"):
             logger.info(f"Audio track subscribed from {participant.identity}")
             if not self.selected_audio_track and isinstance(track, rtc.RemoteAudioTrack):
                 self.selected_audio_track = track
                 
-    async def on_track_unsubscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
+    async def on_track_unsubscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant) -> None:
         """Handle track unsubscription"""
         if track == self.selected_audio_track:
             logger.info("Main audio track unsubscribed")
             self.selected_audio_track = None
             
-    async def on_participant_connected(self, participant: rtc.RemoteParticipant):
+    async def on_participant_connected(self, participant: rtc.RemoteParticipant) -> None:
         """Handle participant connection"""
         logger.info(f"Participant connected: {participant.identity}")
         
@@ -369,13 +376,13 @@ class TranslationBot:
             if track:
                 self.selected_audio_track = track
                 
-    async def on_participant_disconnected(self, participant: rtc.RemoteParticipant):
+    async def on_participant_disconnected(self, participant: rtc.RemoteParticipant) -> None:
         """Handle participant disconnection"""
         logger.info(f"Participant disconnected: {participant.identity}")
         
     # Connection is managed by Agents framework; no manual connect here
     
-    async def run_with_room(self):
+    async def run_with_room(self) -> None:
         """Main processing loop once connected room is available"""
         try:
             # Setup
@@ -411,20 +418,22 @@ class TranslationBot:
                 return
             
             # Open audio stream from the RemoteAudioTrack and feed frames into queue
-            audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
+            audio_q: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=100)
 
-            async def feed_audio():
+            async def feed_audio() -> None:
                 try:
                     stream = rtc.AudioStream(audio_track)
                     async for event in stream:
                         frame = event.frame
-                        pcm = frame.data
-                        if isinstance(pcm, (bytes, bytearray)):
-                            pcm = np.frombuffer(pcm, dtype=np.float32)
-                        if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
-                            pcm = np.mean(pcm, axis=1)
-                        pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
-                        linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
+                        raw_data = frame.data
+                        if isinstance(raw_data, (bytes, bytearray)):
+                            pcm_np = np.frombuffer(raw_data, dtype=np.float32)
+                        else:
+                            pcm_np = np.frombuffer(bytes(raw_data), dtype=np.float32)
+                        if getattr(pcm_np, 'ndim', 1) == 2 and pcm_np.shape[1] > 1:
+                            pcm_np = np.mean(pcm_np, axis=1)
+                        pcm_np = np.clip(pcm_np, -1.0, 1.0).astype(np.float32)
+                        linear16 = (pcm_np * 32767.0).astype(np.int16).tobytes()
                         try:
                             audio_q.put_nowait(linear16)
                         except asyncio.QueueFull:
@@ -449,7 +458,7 @@ class TranslationBot:
             pump_tasks: List[asyncio.Task] = []
             for lang in self.audio_targets:
                 if lang in self.tts_audio_queues and lang in self.audio_sources:
-                    async def _pump(l=lang):
+                    async def _pump(l: str = lang) -> None:
                         q = self.tts_audio_queues[l]
                         source = self.audio_sources[l]
                         frame_samples = int(self.sample_rate * 0.02)
@@ -474,12 +483,12 @@ class TranslationBot:
                                         frame_data = frame_pad
                                         samples = frame_samples
                                     frame = rtc.AudioFrame(
-                                        data=frame_data,
+                                        data=cast(Any, frame_data),
                                         sample_rate=self.sample_rate,
                                         num_channels=self.channels,
                                         samples_per_channel=samples,
                                     )
-                                    source.capture_frame(frame)
+                                    await source.capture_frame(frame)
                                     idx += frame_samples
                         except asyncio.CancelledError:
                             return
@@ -518,7 +527,7 @@ class TranslationBot:
         finally:
             await self.cleanup()
             
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Clean up resources"""
         logger.info("Cleaning up...")
         
@@ -561,12 +570,12 @@ def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[st
     return t_targets, a_targets, voices, src_lang
 
 
-async def entrypoint(ctx: JobContext):
+async def entrypoint(ctx: JobContext) -> None:
     # Determine room name from job context
     room_name: Optional[str] = getattr(getattr(ctx, "job", None), "room_name", None)
 
     # Connect to the room using Agents context (identity handled by framework)
-    room = await ctx.connect()
+    room = cast(rtc.Room, await ctx.connect())
 
     # Register bot and parse metadata
     bot = TranslationBot(event_id=room_name or room.name or "", room_name=room.name)
