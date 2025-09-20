@@ -3,6 +3,18 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
+  // Strip internal Next.js RSC query param on document requests to avoid exposing RSC payloads
+  // Allow RSC fetches (Accept: text/x-component) to pass through untouched
+  if (req.nextUrl.searchParams.has('_rsc')) {
+    const accept = req.headers.get('accept') || ''
+    const isRscFetch = accept.includes('text/x-component') || accept.includes('application/x-component')
+    if (!isRscFetch) {
+      const cleanUrl = req.nextUrl.clone()
+      cleanUrl.searchParams.delete('_rsc')
+      return NextResponse.redirect(cleanUrl)
+    }
+  }
+
   let response = NextResponse.next({
     request: {
       headers: req.headers,
