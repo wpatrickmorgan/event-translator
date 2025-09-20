@@ -39,8 +39,12 @@ class TranslationBot:
         self.audio_targets: List[str] = []
         self.voice_by_lang: Dict[str, str] = {}
         
-        # LiveKit configuration
-        self.livekit_url = os.getenv("LIVEKIT_URL", "")
+        # LiveKit configuration (fallbacks per deployment conventions)
+        self.livekit_url = (
+            os.getenv("LIVEKIT_URL")
+            or os.getenv("NEXT_PUBLIC_LIVEKIT_URL")
+            or os.getenv("LIVEKIT_SERVER_URL", "")
+        )
         self.livekit_api_key = os.getenv("LIVEKIT_API_KEY", "")
         self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET", "")
         
@@ -58,7 +62,8 @@ class TranslationBot:
         self.translate_client: Optional[translate.TranslationServiceClient] = None
         self.tts_client: Optional[texttospeech.TextToSpeechClient] = None
         self.room = None
-        self.selected_audio_track = None
+        # Selected main remote audio track (not publication)
+        self.selected_audio_track: Optional[rtc.RemoteAudioTrack] = None
         self.seq_counter = 0
         
         # TTS streaming state per language
@@ -310,7 +315,7 @@ class TranslationBot:
                 "ts": int(time.time() * 1000),
             })
             
-    async def find_main_audio_track(self) -> Optional[rtc.RemoteTrackPublication]:
+    async def find_main_audio_track(self) -> Optional[rtc.RemoteAudioTrack]:
         """Find the first non-bot remote audio track"""
         if not self.room:
             return None
@@ -321,12 +326,15 @@ class TranslationBot:
                 continue
             for pub in participant.track_publications.values():
                 if pub.kind == rtc.TrackKind.KIND_AUDIO:
-                    logger.info(f"Found main audio track from {participant.identity}")
-                    return pub
+                    # Ensure the publication has a concrete RemoteAudioTrack
+                    track = getattr(pub, "track", None)
+                    if isinstance(track, rtc.RemoteAudioTrack):
+                        logger.info(f"Found main audio track from {participant.identity}")
+                        return track
                     
         return None
         
-    async def wait_for_audio_track(self) -> Optional[rtc.RemoteTrackPublication]:
+    async def wait_for_audio_track(self) -> Optional[rtc.RemoteAudioTrack]:
         """Wait for a main audio track to become available"""
         start_time = time.time()
         
@@ -345,12 +353,12 @@ class TranslationBot:
         """Handle track subscription"""
         if track.kind == rtc.TrackKind.KIND_AUDIO and not participant.identity.startswith("translation-bot:"):
             logger.info(f"Audio track subscribed from {participant.identity}")
-            if not self.selected_audio_track:
-                self.selected_audio_track = publication
+            if not self.selected_audio_track and isinstance(track, rtc.RemoteAudioTrack):
+                self.selected_audio_track = track
                 
     async def on_track_unsubscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant):
         """Handle track unsubscription"""
-        if publication == self.selected_audio_track:
+        if track == self.selected_audio_track:
             logger.info("Main audio track unsubscribed")
             self.selected_audio_track = None
             
@@ -447,8 +455,12 @@ class TranslationBot:
                 logger.error("No audio track available, exiting")
                 return
             
-            # Open audio stream and feed frames into queue
-            stream = await audio_track.audio_stream()
+            # Open audio stream from the RemoteAudioTrack and feed frames into queue
+            try:
+                # Prefer explicit constructor; fallback to from_track if available
+                stream = rtc.AudioStream(audio_track)  # type: ignore[arg-type]
+            except Exception:
+                stream = rtc.AudioStream.from_track(audio_track)  # type: ignore[attr-defined]
             audio_q: asyncio.Queue = asyncio.Queue(maxsize=100)
 
             async def feed_audio():
