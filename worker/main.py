@@ -143,14 +143,20 @@ class TranslationWorker:
                 self.audio_sources[lang] = audio_source
                 self.published_tracks[lang] = track
                 
-                # Initialize TTS client
+                # Initialize TTS client with hardcoded Spanish voice for testing
+                tts_kwargs = {
+                    "language": lang,
+                }
+                
+                # TEMPORARY: Hardcode Spanish voice for testing
+                if lang.startswith("es"):
+                    tts_kwargs["voice"] = "es-ES-Chirp-HD-D"
+                    logger.info(f"Using hardcoded Spanish voice 'es-ES-Chirp-HD-D' for {lang}")
+                
                 if credentials_info:
-                    self.tts_clients[lang] = google.TTS(
-                        language=lang,
-                        credentials_info=credentials_info
-                    )
-                else:
-                    self.tts_clients[lang] = google.TTS(language=lang)
+                    tts_kwargs["credentials_info"] = credentials_info
+                
+                self.tts_clients[lang] = google.TTS(**tts_kwargs)
                 
                 # Set up TTS queue and processing task
                 self.tts_queues[lang] = asyncio.Queue()
