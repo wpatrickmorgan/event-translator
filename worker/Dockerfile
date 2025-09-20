@@ -17,5 +17,5 @@ COPY main.py .
 # Create directory for Google credentials
 RUN mkdir -p /app
 
-# Default command: run Agents worker
-CMD ["python", "main.py"]
+# Default command: run Agents worker in production mode
+CMD ["python", "main.py", "start"]
