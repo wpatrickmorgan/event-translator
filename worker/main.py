@@ -442,7 +442,11 @@ def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[st
 async def entrypoint(ctx: JobContext) -> None:
     """Entry point using standard LiveKit Python SDK - much cleaner!"""
     
-    # Parse room metadata for configuration
+    # Connect to the job context FIRST before reading metadata
+    await ctx.connect()
+    logger.info(f"Connected to room: {ctx.room.name}")
+    
+    # NOW parse room metadata after connection is established
     metadata_obj: Dict[str, Any] = {}
     try:
         if isinstance(ctx.room.metadata, str) and ctx.room.metadata:
@@ -461,7 +465,7 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info(f"Parsed metadata - src_lang: {src_lang}, t_targets: {t_targets}, a_targets: {a_targets}")
     logger.info(f"Final config - primary_lang: {primary_lang}, translation_targets: {translation_targets}, audio_targets: {audio_targets}")
     
-    # Create translation worker
+    # Create translation worker with the parsed configuration
     worker = TranslationWorker(
         room=ctx.room,
         primary_lang=primary_lang,
@@ -470,12 +474,9 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     
     try:
-        # Connect to the job context first!
-        await ctx.connect()
-        logger.info(f"Connected to room: {ctx.room.name}")
-        
         # Start the worker
         await worker.start()
+        logger.info("Worker started successfully")
         
         # Keep running until room disconnects
         logger.info("Translation worker is running...")
