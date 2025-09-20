@@ -562,11 +562,15 @@ def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[st
 
 
 async def entrypoint(ctx: JobContext):
+    # Determine room name from job context and set a stable identity
+    room_name: Optional[str] = getattr(getattr(ctx, "job", None), "room_name", None)
+    identity = f"translation-bot:{room_name}" if room_name else f"translation-bot:{int(time.time())}"
+
     # Connect to the room using Agents context
-    room = await ctx.connect()
+    room = await ctx.connect(identity=identity)
 
     # Register bot and parse metadata
-    bot = TranslationBot(event_id=room.name, room_name=room.name)
+    bot = TranslationBot(event_id=room_name or room.name or "", room_name=room.name)
     bot.room = room
     bot.is_connected = True
 
