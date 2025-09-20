@@ -41,10 +41,10 @@ export async function ensureRoom(roomName: string, metadata?: unknown) {
     // assume already exists or transient error; proceed
   }
 
-  // Try to update metadata directly
+  // Try to update metadata directly using the proper SDK method
   if (metadata) {
     try {
-      await (svc as unknown as { updateRoom: (args: { room: string; metadata?: string }) => Promise<unknown> }).updateRoom({ room: roomName, metadata: JSON.stringify(metadata) })
+      await svc.updateRoomMetadata(roomName, JSON.stringify(metadata))
       return
     } catch {}
 

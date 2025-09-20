@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
 import { ensureRoom } from '@/lib/livekit'
+import { hasVoiceId } from '@/lib/utils/type-guards'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: eventId } = await params
@@ -36,7 +37,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         lang: l.language.code,
         captions: l.mode === 'captions_only' || l.mode === 'both',
         audio: l.mode === 'audio_only' || l.mode === 'both',
-        voice: (l as { voice_id?: string }).voice_id ?? undefined,
+        voice: hasVoiceId(l) ? l.voice_id : undefined,
       })),
     })
   } catch (e) {

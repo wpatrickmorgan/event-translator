@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Room, RoomEvent, RemoteTrackPublication, Track } from 'livekit-client'
 import { useAttendeeStore } from '@/lib/stores/attendeeStore'
+import { isTranslationTextMessage } from '@/types/livekit-messages'
 
 interface AttendeeLiveProps {
   roomName: string
@@ -51,17 +52,20 @@ export function AttendeeLive(props: AttendeeLiveProps) {
     r.on(RoomEvent.DataReceived, (payload) => {
       try {
         const str = new TextDecoder().decode(payload)
-        const msg = JSON.parse(str) as { type?: string; text?: string; lang?: string; isFinal?: boolean }
-        if (!msg || typeof msg !== 'object') return
+        const msg = JSON.parse(str)
         if (!enableCaptions) return
         if (!selectedLangCode) return
-        const expectedType = `translation-text-${selectedLangCode}`
-        if (msg.type === expectedType && typeof msg.text === 'string') {
-          // append, keep last 50
-          setCaptions(prev => {
-            const next = [...prev, msg.text!]
-            return next.slice(-50)
-          })
+        
+        // Use type guard for safe type checking
+        if (isTranslationTextMessage(msg)) {
+          const expectedType = `translation-text-${selectedLangCode}`
+          if (msg.type === expectedType) {
+            // append, keep last 50
+            setCaptions(prev => {
+              const next = [...prev, msg.text]
+              return next.slice(-50)
+            })
+          }
         }
       } catch {}
     })

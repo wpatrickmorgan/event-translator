@@ -1,0 +1,375 @@
+LiveKit Docs › Building voice agents › Text & transcriptions
+
+---
+
+# Text and transcriptions
+
+> Integrate realtime text features into your agent.
+
+## Overview
+
+LiveKit Agents supports text inputs and outputs in addition to audio, based on the [text streams](https://docs.livekit.io/home/client/data/text-streams.md) feature of the LiveKit SDKs. This guide explains what's possible and how to use it in your app.
+
+## Transcriptions
+
+When an agent performs STT as part of its processing pipeline, the transcriptions are also published to the frontend in realtime. Additionally, a text representation of the agent speech is also published in sync with audio playback when the agent speaks. These features are both enabled by default when using `AgentSession`.
+
+Transcriptions use the `lk.transcription` text stream topic. They include a `lk.transcribed_track_id` attribute and the sender identity is the transcribed participant.
+
+To disable transcription output, set `transcription_enabled=False` in `RoomOutputOptions`.
+
+### Synchronized transcription forwarding
+
+When both voice and transcription are enabled, the agent's speech is synchronized with its transcriptions, displaying text word by word as it speaks. If the agent is interrupted, the transcription stops and is truncated to match the spoken output.
+
+#### Disabling synchronization
+
+To send transcriptions to the client as soon as they become available, without synchronizing to the original speech, set `sync_transcription` to False in `RoomOutputOptions`.
+
+**Python**:
+
+```python
+await session.start(
+    agent=MyAgent(),
+    room=ctx.room,
+    room_output_options=RoomOutputOptions(sync_transcription=False),
+)
+
+```
+
+---
+
+**Node.js**:
+
+```typescript
+import { voice } from '@livekit/agents';
+
+await session.start({
+  agent: new MyAgent(),
+  room: ctx.room,
+  outputOptions: {
+    syncTranscription: false,
+  },
+});
+
+```
+
+### Accessing from AgentSession
+
+You can be notified within your agent whenever text input or output is committed to the chat history by listening to the [conversation_item_added](https://docs.livekit.io/agents/build/events.md#conversation_item_added) event.
+
+### TTS-aligned transcriptions
+
+Available in:
+- [ ] Node.js
+- [x] Python
+
+If your TTS provider supports it, you can enable TTS-aligned transcription forwarding to improve transcription synchronization to your frontend. This feature synchronizes the transcription output with the actual speech timing, enabling word-level synchronization. When using this feature, certain formatting may be lost from the original text (dependent on the TTS provider).
+
+Currently, only [Cartesia](https://docs.livekit.io/agents/integrations/tts/cartesia.md) and [ElevenLabs](https://docs.livekit.io/agents/integrations/tts/elevenlabs.md) support word-level transcription timing. For other providers, the alignment is applied at the sentence level and still improves synchronization reliability for multi-sentence turns.
+
+To enable this feature, set `use_tts_aligned_transcript=True` in your `AgentSession` configuration:
+
+**Python**:
+
+```python
+session = AgentSession(
+    # ... stt, llm, tts, vad, etc...
+    use_tts_aligned_transcript=True,
+)
+
+```
+
+To access timing information in your code, implement a [transcription_node](https://docs.livekit.io/agents/build/nodes.md#transcription-node) method in your agent. The iterator yields a `TimedString` which includes `start_time` and `end_time` for each word, in seconds relative to the start of the agent's current [turn](https://docs.livekit.io/agents/build/turns.md).
+
+> 🔥 **Experimental feature**
+> 
+> The `transcription_node` and `TimedString` implementations are experimental and may change in a future version of the SDK.
+
+Available in:
+- [ ] Node.js
+- [x] Python
+
+```python
+async def transcription_node(
+    self, text: AsyncIterable[str | TimedString], model_settings: ModelSettings
+) -> AsyncGenerator[str | TimedString, None]:
+    async for chunk in text:
+        if isinstance(chunk, TimedString):
+            logger.info(f"TimedString: '{chunk}' ({chunk.start_time} - {chunk.end_time})")
+        yield chunk
+
+```
+
+## Text input
+
+Your agent also monitors the `lk.chat` text stream topic for incoming text messages from its linked participant. The agent interrupts its current speech, if any, to process the message and generate a new response.
+
+To disable text input, set `text_enabled=False` in `RoomInputOptions`.
+
+## Text-only sessions
+
+You have two options for disabling audio input and output for text-only sessions:
+
+- Permanently: Disable audio for the entire session to prevent any audio tracks from being published to the room.
+- Temporarily: Toggle audio input and output dynamically for hybrid sessions.
+
+Turn off audio input and output for a text-only session, or dynamically, using the `session.input.set_audio_enabled()` and `session.output.set_audio_enabled()` methods.
+
+### Disable audio for the entire session
+
+To turn off audio input or output for the entire session, set `audio_enabled=False` in `RoomInputOptions` or `RoomOutputOptions` when you start the session. When audio output is disabled, the agent does not publish audio tracks to the room. Text responses are sent without the `lk.transcribed_track_id` attribute and without speech synchronization.
+
+**Python**:
+
+```python
+session.start(
+    # ... agent, room
+    room_input_options=RoomInputOptions(audio_enabled=False),
+    room_output_options=RoomOutputOptions(audio_enabled=False),
+)
+
+```
+
+---
+
+**Node.js**:
+
+```typescript
+await session.start({
+  // ... agent, room
+  inputOptions: {
+    audioEnabled: false,
+  },
+  outputOptions: {
+    audioEnabled: false,
+  },
+});
+
+```
+
+### Toggle audio input and output
+
+For hybrid sessions where audio input and output might be used, such as when a user toggles an audio switch, you can allow the agent to toggle audio input and output dynamically using `session.input.set_audio_enabled()` and `session.output.set_audio_enabled()`. This still publishes the audio track to the room.
+
+- **[Toggle Audio](https://github.com/livekit/agents/blob/main/examples/voice_agents/toggle_io.py)**: An example of dynamically toggling audio input and output.
+
+**Python**:
+
+```python
+session = AgentSession(...)
+
+# start with audio disabled
+session.input.set_audio_enabled(False)
+session.output.set_audio_enabled(False)
+await session.start(...)
+
+# user toggles audio switch
+@room.local_participant.register_rpc_method("toggle_audio")
+async def on_toggle_audio(data: rtc.RpcInvocationData) -> None:
+    session.input.set_audio_enabled(not session.input.audio_enabled)
+    session.output.set_audio_enabled(not session.output.audio_enabled)
+
+```
+
+---
+
+**Node.js**:
+
+```typescript
+import { voice } from '@livekit/agents';
+
+const session = new voice.AgentSession({
+  // ... configuration
+});
+
+// start with audio disabled
+session.input.setAudioEnabled(false);
+session.output.setAudioEnabled(false);
+await session.start({
+  agent,
+  room: ctx.room,
+});
+
+// user toggles audio switch
+ctx.room.localParticipant.registerRpcMethod('toggle_audio', async (data) => {
+  session.input.setAudioEnabled(!session.input.audioEnabled);
+  session.output.setAudioEnabled(!session.output.audioEnabled);
+});
+
+```
+
+You can also temporarily pause audio input to prevent speech from being queued for response. This is useful when an agent needs to run non-verbal jobs and you want to stop the agent from listening to any input. This prevents the audio track from being published to the room.
+
+> 💡 **Tip**
+> 
+> This is different from [manual turn control](https://docs.livekit.io/agents/build/turns.md#manual) which is used for interfaces such as push-to-talk.
+
+**Python**:
+
+```python
+# if currently speaking, stop first so states don't overlap
+session.interrupt()
+
+session.input.set_audio_enabled(False) # stop listening
+try:
+    await do_job()  # your non-verbal job
+finally:
+    session.input.set_audio_enabled(True) # start listening again
+
+```
+
+---
+
+**Node.js**:
+
+```typescript
+try {
+  // if currently speaking, stop first so states don't overlap
+  session.interrupt();
+
+  session.input.setAudioEnabled(false); // stop listening
+  await doJob(); // your non-verbal job
+} finally {
+  session.input.setAudioEnabled(true); // start listening again
+}
+
+async function doJob() {
+  // placeholder for actual work
+  return new Promise((resolve) => setTimeout(resolve, 7000));
+}
+
+```
+
+## Frontend integration
+
+LiveKit client SDKs have native support for text streams. For more information, see the [text streams](https://docs.livekit.io/home/client/data/text-streams.md) documentation.
+
+### Receiving text streams
+
+Use the `registerTextStreamHandler` method to receive incoming transcriptions or text:
+
+**JavaScript**:
+
+```typescript
+room.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+  const message = await reader.readAll();
+  if (reader.info.attributes['lk.transcribed_track_id']) {
+    console.log(`New transcription from ${participantInfo.identity}: ${message}`);
+  } else {
+    console.log(`New message from ${participantInfo.identity}: ${message}`);
+  }
+});
+
+```
+
+---
+
+**Swift**:
+
+```swift
+try await room.registerTextStreamHandler(for: "lk.transcription") { reader, participantIdentity in
+    let message = try await reader.readAll()
+    if let transcribedTrackId = reader.info.attributes["lk.transcribed_track_id"] {
+        print("New transcription from \(participantIdentity): \(message)")
+    } else {
+        print("New message from \(participantIdentity): \(message)")
+    }
+}
+
+```
+
+### Sending text input
+
+Use the `sendText` method to send text messages:
+
+**JavaScript**:
+
+```typescript
+const text = 'Hello how are you today?';
+const info = await room.localParticipant.sendText(text, {
+  topic: 'lk.chat',
+});
+
+```
+
+---
+
+**Swift**:
+
+```swift
+let text = "Hello how are you today?"
+let info = try await room.localParticipant.sendText(text, for: "lk.chat")
+
+```
+
+## Manual text input
+
+To insert text input and generate a response, use the `generate_reply` method of AgentSession: `session.generate_reply(user_input="...")`.
+
+## Transcription events
+
+Frontend SDKs can also receive transcription events via `RoomEvent.TranscriptionReceived`.
+
+> 🔥 **Deprecated feature**
+> 
+> Transcription events will be removed in a future version. Use [text streams](https://docs.livekit.io/home/client/data/text-streams.md) on the `lk.chat` topic instead.
+
+**JavaScript**:
+
+```typescript
+room.on(RoomEvent.TranscriptionReceived, (segments) => {
+  for (const segment of segments) {
+    console.log(`New transcription from ${segment.senderIdentity}: ${segment.text}`);
+  }
+});
+
+```
+
+---
+
+**Swift**:
+
+```swift
+func room(_ room: Room, didReceiveTranscriptionSegments segments: [TranscriptionSegment]) {
+  for segment in segments {
+    print("New transcription from \(segment.senderIdentity): \(segment.text)")
+  }
+}
+
+```
+
+---
+
+**Android**:
+
+```kotlin
+room.events.collect { event ->
+  if (event is RoomEvent.TranscriptionReceived) {
+    event.transcriptionSegments.forEach { segment ->
+      println("New transcription from ${segment.senderIdentity}: ${segment.text}")
+    }
+  }
+}
+
+```
+
+---
+
+**Flutter**:
+
+```dart
+room.createListener().on<TranscriptionEvent>((event) {
+  for (final segment in event.segments) {
+    print("New transcription from ${segment.senderIdentity}: ${segment.text}");
+  }
+});
+
+```
+
+---
+
+This document was rendered at 2025-09-20T04:26:36.287Z.
+For the latest version of this document, see [https://docs.livekit.io/agents/build/text.md](https://docs.livekit.io/agents/build/text.md).
+
+To explore all LiveKit documentation, see [llms.txt](https://docs.livekit.io/llms.txt).

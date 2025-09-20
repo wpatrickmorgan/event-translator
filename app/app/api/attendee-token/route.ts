@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
 import { mintJoinToken } from '@/lib/livekit'
 import { randomUUID } from 'crypto'
+import { isValidEventRow, hasIsPublic } from '@/lib/utils/type-guards'
 
 type PostBody = {
   code: string
@@ -30,12 +31,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'Invalid or expired code' }, { status: 404 })
     }
 
-    const firstRow = data[0] as {
-      event_id: string
-      room_name: string
-      is_public?: boolean
-      language_id: string
-      mode: 'audio_only' | 'captions_only' | 'both'
+    const firstRow = data[0]
+    if (!isValidEventRow(firstRow)) {
+      return NextResponse.json({ error: 'Invalid event data' }, { status: 404 })
     }
     const eventId: string | null = firstRow.event_id ?? null
     const roomName: string | null = firstRow.room_name ?? null
@@ -46,7 +44,7 @@ export async function POST(req: NextRequest) {
 
     // Explicit public enforcement: if the RPC includes is_public, enforce it here
     // If not present, continue (backward compatible with older RPC definition)
-    if (Object.prototype.hasOwnProperty.call(firstRow, 'is_public') && firstRow.is_public === false) {
+    if (hasIsPublic(firstRow) && firstRow.is_public === false) {
       return NextResponse.json({ message: 'Event is not public' }, { status: 403 })
     }
 

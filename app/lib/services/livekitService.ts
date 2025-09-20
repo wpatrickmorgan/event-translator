@@ -1,3 +1,5 @@
+import { hasToken } from '@/lib/utils/type-guards'
+
 export type AdminTokenResponse = {
   token: string
   url?: string | null
@@ -10,8 +12,14 @@ export const LivekitService = {
     if (!res.ok) {
       throw new Error('Failed to fetch LiveKit token')
     }
-    const json = (await res.json()) as { token: string; url?: string | null }
-    return { token: json.token, url: json.url ?? null }
+    const json = await res.json()
+    if (!hasToken(json)) {
+      throw new Error('Invalid response: missing token')
+    }
+    return { 
+      token: json.token, 
+      url: ('url' in json && typeof json.url === 'string') ? json.url : null 
+    }
   },
 }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
 import { ensureRoom } from '@/lib/livekit'
+import { hasLanguageCode } from '@/lib/utils/type-guards'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,12 +30,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       .eq('event_id', eventId)
     if (langErr) return NextResponse.json({ error: 'Failed to load languages' }, { status: 500 })
 
-    const outputs = (langs || []).map(l => ({
-      lang: l.language.code as string,
-      captions: l.mode === 'captions_only' || l.mode === 'both',
-      audio: l.mode === 'audio_only' || l.mode === 'both',
-      voice: l.voice_id ?? undefined,
-    }))
+    const outputs = (langs || [])
+      .filter(hasLanguageCode)
+      .map(l => ({
+        lang: l.language.code,
+        captions: l.mode === 'captions_only' || l.mode === 'both',
+        audio: l.mode === 'audio_only' || l.mode === 'both',
+        voice: l.voice_id ?? undefined,
+      }))
 
     await ensureRoom(event.room_name, {
       eventId,

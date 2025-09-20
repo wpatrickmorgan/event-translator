@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import time
-from typing import Optional, Dict, Any, List, Tuple, Iterable, Iterator, cast
+from typing import Optional, Dict, Any, List, Tuple, Iterable, Iterator
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -483,7 +483,7 @@ class TranslationBot:
                                         frame_data = frame_pad
                                         samples = frame_samples
                                     frame = rtc.AudioFrame(
-                                        data=cast(Any, frame_data),
+                                        data=frame_data.tobytes(),
                                         sample_rate=self.sample_rate,
                                         num_channels=self.channels,
                                         samples_per_channel=samples,
