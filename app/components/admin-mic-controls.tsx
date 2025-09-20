@@ -1,7 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Room, RoomEvent, LocalAudioTrack, createLocalAudioTrack } from 'livekit-client'
+import { Room, RoomEvent, LocalAudioTrack } from 'livekit-client'
+import { LivekitService } from '@/lib/services/livekitService'
+import { LivekitAdminService } from '@/lib/services/livekitAdminService'
+import { useAudioLevelMeter } from '@/hooks/useAudioLevelMeter'
 
 type EventStatus = 'scheduled' | 'live' | 'paused' | 'ended' | 'canceled'
 
@@ -13,63 +16,18 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
   const trackRef = useRef<LocalAudioTrack | null>(null)
   const hasConnectedRef = useRef(false)
 
-  const meterRaf = useRef<number | null>(null)
-  const audioCtxRef = useRef<AudioContext | null>(null)
-  const analyserRef = useRef<AnalyserNode | null>(null)
-  const dataRef = useRef<Float32Array<ArrayBuffer> | null>(null)
+  const { level, start, stop } = useAudioLevelMeter(null as unknown as MediaStreamTrack | null)
 
   const [connecting, setConnecting] = useState(false)
   const [micOn, setMicOn] = useState(false)
   const micOnRef = useRef(false)
-  const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   // (moved below after meter callbacks are defined)
 
-  // Meter helpers
-  const stopMeter = useCallback(() => {
-    if (meterRaf.current) {
-      cancelAnimationFrame(meterRaf.current)
-      meterRaf.current = null
-    }
-    try { audioCtxRef.current?.close() } catch {}
-    audioCtxRef.current = null
-    analyserRef.current = null
-    dataRef.current = null
-    setLevel(0)
-  }, [])
-
-  const startMeter = useCallback((mediaStreamTrack: MediaStreamTrack) => {
-    stopMeter()
-    const ctx = new AudioContext()
-    const stream = new MediaStream([mediaStreamTrack])
-    const source = ctx.createMediaStreamSource(stream)
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 1024
-    source.connect(analyser)
-    const data = new Float32Array(analyser.fftSize) as unknown as Float32Array<ArrayBuffer>
-
-    audioCtxRef.current = ctx
-    analyserRef.current = analyser
-    dataRef.current = data
-
-    const loop = () => {
-      if (!micOnRef.current) {
-        setLevel(0)
-      } else if (analyserRef.current && dataRef.current) {
-        analyserRef.current.getFloatTimeDomainData(dataRef.current as unknown as Float32Array<ArrayBuffer>)
-        let sum = 0
-        for (let i = 0; i < dataRef.current.length; i++) {
-          const v = dataRef.current[i]
-          sum += v * v
-        }
-        const rms = Math.sqrt(sum / dataRef.current.length)
-        setLevel(Math.min(1, rms * 2))
-      }
-      meterRaf.current = window.requestAnimationFrame(loop)
-    }
-    meterRaf.current = window.requestAnimationFrame(loop)
-  }, [stopMeter])
+  // Meter bridge
+  const startMeter = useCallback((track: MediaStreamTrack) => start(track), [start])
+  const stopMeter = useCallback(() => stop(), [stop])
 
   // Connect while live/paused; disconnect otherwise. Auto-publish on live.
   useEffect(() => {
@@ -84,21 +42,15 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
         try {
           setConnecting(true)
           setError(null)
-          const qs = new URLSearchParams({ eventId, identity, name: displayName })
-          const res = await fetch(`/api/livekit-token?${qs.toString()}`, { cache: 'no-store' })
-          if (!res.ok) throw new Error('Failed to fetch LiveKit token')
-          const { token, url } = await res.json()
+          const { token, url } = await LivekitService.fetchAdminToken(eventId, identity, displayName)
           if (cancelled) return
-          const room = new Room()
-          await room.connect(typeof url === 'string' ? url : String(url), typeof token === 'string' ? token : String(token), { autoSubscribe: true })
-          roomRef.current = room
-          hasConnectedRef.current = true
-
-          room.on(RoomEvent.Disconnected, () => {
+          const room = await LivekitAdminService.connect((url ?? '') as string, token, () => {
             stopMeter()
             trackRef.current = null
             setMicOn(false)
           })
+          roomRef.current = room
+          hasConnectedRef.current = true
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Connection failed')
         } finally {
@@ -109,14 +61,8 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
       // Auto-publish when status is live
       if (status === 'live' && roomRef.current && !trackRef.current) {
         try {
-          const track = await createLocalAudioTrack({
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          })
-          await roomRef.current.localParticipant.publishTrack(track)
+          const track = await LivekitAdminService.publishMic(roomRef.current)
           trackRef.current = track
-          try { await track.unmute() } catch {}
           setMicOn(true)
           startMeter(track.mediaStreamTrack)
         } catch (e) {
@@ -159,14 +105,8 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
       // If no track yet (e.g., paused when first opening), create and publish now
       if (!roomRef.current) return
       try {
-        const newTrack = await createLocalAudioTrack({
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        })
-        await roomRef.current.localParticipant.publishTrack(newTrack)
+        const newTrack = await LivekitAdminService.publishMic(roomRef.current)
         trackRef.current = newTrack
-        try { await newTrack.unmute() } catch {}
         setMicOn(true)
         startMeter(newTrack.mediaStreamTrack)
       } catch (e) {
@@ -178,9 +118,9 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
     const next = !micOn
     try {
       if (next) {
-        try { await track.unmute() } catch {}
+        await LivekitAdminService.unmute(track)
       } else {
-        try { await track.mute() } catch {}
+        await LivekitAdminService.mute(track)
       }
       setMicOn(next)
     } catch (e) {
@@ -191,17 +131,18 @@ export function AdminMicControls({ eventId, status }: { eventId: string; status:
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      try {
-        const track = trackRef.current
-        if (track) {
-          try { track.mute() } catch {}
-          try { roomRef.current?.localParticipant.unpublishTrack(track, true) } catch {}
-        }
-        stopMeter()
-        roomRef.current?.disconnect()
-      } catch {}
-      roomRef.current = null
-      trackRef.current = null
+      (async () => {
+        try {
+          const track = trackRef.current
+          if (track && roomRef.current) {
+            await LivekitAdminService.unpublishAndStop(roomRef.current, track)
+          }
+          stopMeter()
+          if (roomRef.current) await LivekitAdminService.disconnect(roomRef.current)
+        } catch {}
+        roomRef.current = null
+        trackRef.current = null
+      })()
     }
   }, [stopMeter])
 
