@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
 
     // Anonymous/public route – do NOT require auth. Use RPC to fetch event context by join code
     const supabase = await getSupabaseServer()
-    const { data, error } = await supabase.rpc('get_public_event_and_languages_by_code', { code })
+    const { data, error } = await supabase.rpc('get_public_event_and_languages_by_code', { p_code: code })
     if (error) {
       return NextResponse.json({ message: 'Failed to resolve event' }, { status: 500 })
     }

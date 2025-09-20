@@ -24,7 +24,7 @@ export class PublicEventService {
   static async getEventByCode(code: string): Promise<PublicEventData | null> {
     try {
       const { data, error } = await supabase.rpc('get_public_event_and_languages_by_code', {
-        code,
+        p_code: code,
       })
 
       if (error) {
