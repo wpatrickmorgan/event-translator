@@ -19,6 +19,7 @@ from livekit.agents import cli, WorkerOptions, JobContext
 from livekit.plugins import google
 from livekit.agents.stt import SpeechEventType
 from google.cloud import translate_v3 as translate
+from google.oauth2 import service_account
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -102,8 +103,14 @@ class TranslationWorker:
         
         # Initialize Google Translate
         try:
-            self.translate_client = translate.TranslationServiceClient()
-            logger.info("Google Translate client initialized")
+            if credentials_info:
+                # Create credentials object and use it
+                credentials = service_account.Credentials.from_service_account_info(credentials_info)
+                self.translate_client = translate.TranslationServiceClient(credentials=credentials)
+                logger.info("Google Translate client initialized with credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON")
+            else:
+                self.translate_client = translate.TranslationServiceClient()
+                logger.info("Google Translate client initialized with default credentials")
         except Exception as e:
             logger.error(f"Failed to initialize Google Translate client: {e}")
     
@@ -440,7 +447,9 @@ async def entrypoint(ctx: JobContext) -> None:
     try:
         if isinstance(ctx.room.metadata, str) and ctx.room.metadata:
             metadata_obj = json.loads(ctx.room.metadata)
-    except Exception:
+            logger.info(f"Room metadata: {metadata_obj}")
+    except Exception as e:
+        logger.warning(f"Failed to parse room metadata: {e}")
         metadata_obj = {}
 
     # Configure languages from metadata
@@ -458,6 +467,10 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     
     try:
+        # Connect to the job context first!
+        await ctx.connect()
+        logger.info(f"Connected to room: {ctx.room.name}")
+        
         # Start the worker
         await worker.start()
         

@@ -33,6 +33,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     await ensureRoom(event.room_name, {
       eventId,
       orgId: event.org_id,
+      sourceLanguage: 'en-US', // Default source language
       outputs: (langs || []).map(l => ({
         lang: l.language.code,
         captions: l.mode === 'captions_only' || l.mode === 'both',

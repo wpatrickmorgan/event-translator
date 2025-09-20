@@ -42,6 +42,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     await ensureRoom(event.room_name, {
       eventId,
       orgId: event.org_id,
+      sourceLanguage: 'en-US', // Default source language
       outputs,
     })
 
