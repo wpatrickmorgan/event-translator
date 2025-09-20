@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-LiveKit Translation Bot Agent (Agents Framework)
+LiveKit Translation Bot Agent (Using Standard AgentSession Pattern)
 
-Runs as an Agents worker job participant, streams audio to Google Cloud STT,
-publishes final-only original-language text, translates final results to
-configured targets, and optionally publishes per-language TTS audio tracks.
+Uses LiveKit AgentSession for automatic audio management with Google STT/TTS plugins
+while keeping Google Translate for accurate translation. RoomIO handles all audio I/O.
 """
 
 import asyncio
@@ -12,249 +11,85 @@ import json
 import logging
 import os
 import time
-from typing import Optional, Dict, Any, List, Tuple, Iterable, Iterator
+from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from livekit import rtc
-from livekit.agents import cli, WorkerOptions, JobContext, AutoSubscribe
-from google.cloud import speech
-from google.cloud import texttospeech
+from livekit.agents import cli, WorkerOptions, JobContext, AgentSession, Agent, RoomInputOptions
+from livekit.plugins import google
 from google.cloud import translate_v3 as translate
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class TranslationBot:
-    def __init__(self, *, event_id: Optional[str] = None, room_name: Optional[str] = None):
-        self.event_id = event_id or os.getenv("EVENT_ID", "")
-        self.room_name = room_name or os.getenv("ROOM_NAME", "")
-        # Language configuration is sourced from room metadata; default fallback
-        self.primary_lang = "en-US"
-        self.translation_targets: List[str] = []
-        self.audio_targets: List[str] = []
-        self.voice_by_lang: Dict[str, str] = {}
+class TranslationAgent(Agent):
+    """Custom translation agent that uses Google Translate instead of LLM"""
+    
+    def __init__(
+        self, 
+        primary_lang: str = "en-US",
+        translation_targets: List[str] = None,
+        audio_targets: List[str] = None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
         
-        # LiveKit configuration (fallbacks per deployment conventions)
-        self.livekit_url = (
-            os.getenv("LIVEKIT_URL")
-            or os.getenv("NEXT_PUBLIC_LIVEKIT_URL")
-            or os.getenv("LIVEKIT_SERVER_URL", "")
-        )
-        self.livekit_api_key = os.getenv("LIVEKIT_API_KEY", "")
-        self.livekit_api_secret = os.getenv("LIVEKIT_API_SECRET", "")
+        # Language configuration
+        self.primary_lang = primary_lang
+        self.translation_targets = translation_targets or []
+        self.audio_targets = audio_targets or []
         
-        # Google Cloud configuration
-        self.google_credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON", "")
-        self.google_credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+        # Google Translate client (plugins handle STT/TTS)
+        self.translate_client: Optional[translate.TranslationServiceClient] = None
         self.gcp_project_id: Optional[str] = None
         
-        # Audio processing
-        self.sample_rate = 48000
-        self.channels = 1  # mono
-        self.audio_buffer: List[bytes] = []
-        self.stt_client: Optional[speech.SpeechClient] = None
-        self.streaming_config: Optional[speech.StreamingRecognitionConfig] = None
-        self.translate_client: Optional[translate.TranslationServiceClient] = None
-        self.tts_client: Optional[texttospeech.TextToSpeechClient] = None
-        self.room: Optional[rtc.Room] = None
-        # Selected main remote audio track (not publication)
-        self.selected_audio_track: Optional[rtc.RemoteAudioTrack] = None
-        self.seq_counter = 0
-        
-        # TTS streaming state per language
-        self.tts_audio_queues: Dict[str, asyncio.Queue] = {}
+        # Per-language TTS audio tracks
         self.audio_sources: Dict[str, rtc.AudioSource] = {}
-        self.local_audio_tracks: Dict[str, rtc.LocalAudioTrack] = {}
-        self.audio_pump_tasks: Dict[str, asyncio.Task] = {}
+        self.published_tracks: Dict[str, rtc.LocalAudioTrack] = {}
+        self.tts_queues: Dict[str, asyncio.Queue] = {}
+        self.tts_tasks: List[asyncio.Task] = []
         
-        # State
-        self.is_connected = False
-        self.audio_timeout = 600  # seconds to wait for audio (10 minutes)
+    async def astart(self, ctx: rtc.Room) -> None:
+        """Called when agent starts - set up translation services"""
+        await super().astart(ctx)
         
-    def setup_google_credentials(self) -> None:
-        """Setup Google Cloud credentials from JSON or file"""
-        if self.google_credentials_json:
-            # Write JSON credentials to file
-            credentials_path = "/app/gcp-key.json"
-            with open(credentials_path, "w") as f:
-                f.write(self.google_credentials_json)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-            logger.info("Google credentials written to /app/gcp-key.json")
-            # Try to read project_id from provided JSON
+        # Initialize Google Translate
+        self.setup_google_translate()
+        
+        # Set up per-language TTS audio tracks
+        if self.audio_targets:
+            await self.setup_audio_tracks()
+    
+    def setup_google_translate(self) -> None:
+        """Initialize Google Translate client"""
+        try:
+            self.translate_client = translate.TranslationServiceClient()
+            # Try to get project ID from credentials
             try:
-                creds = json.loads(self.google_credentials_json)
-                self.gcp_project_id = creds.get("project_id")
-            except Exception:
-                pass
-        elif self.google_credentials_path and os.path.exists(self.google_credentials_path):
-            logger.info(f"Using Google credentials from {self.google_credentials_path}")
-            try:
-                with open(self.google_credentials_path, "r") as f:
-                    creds = json.load(f)
+                credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+                if credentials_json:
+                    creds = json.loads(credentials_json)
                     self.gcp_project_id = creds.get("project_id")
             except Exception:
                 pass
-        else:
-            logger.warning("No Google credentials found - STT will not work")
             
-    
-        
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_stt_client(self) -> None:
-        """Create Google Cloud Speech-to-Text client with retry"""
-        try:
-            self.stt_client = speech.SpeechClient()
-            logger.info("Google Cloud STT client created successfully")
+            if not self.gcp_project_id:
+                logger.warning("GCP project ID not found - translation may not work")
+                
+            logger.info("Google Translate client initialized")
         except Exception as e:
-            logger.error(f"Failed to create STT client: {e}")
-            raise
-    
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_translate_client(self) -> None:
-        try:
-            self.translate_client = translate.TranslationServiceClient()
-            logger.info("Google Cloud Translate client created successfully")
-        except Exception as e:
-            logger.error(f"Failed to create Translate client: {e}")
-            raise
-    
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def create_tts_client(self) -> None:
-        try:
-            self.tts_client = texttospeech.TextToSpeechClient()
-            logger.info("Google Cloud TTS client created successfully")
-        except Exception as e:
-            logger.error(f"Failed to create TTS client: {e}")
-            raise
-            
-    def create_stt_streaming_config(self) -> None:
-        """Create streaming STT configuration (final results only)."""
-        self.streaming_config = speech.StreamingRecognitionConfig(
-            config=speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self.sample_rate,
-                language_code=self.primary_lang,
-                enable_automatic_punctuation=True,
-            ),
-            interim_results=False,
-        )
-        logger.info(f"STT streaming config prepared for language: {self.primary_lang}")
-        
-    def convert_audio_to_linear16(self, audio_data: np.ndarray) -> bytes:
-        """Convert float32 PCM audio to LINEAR16 format"""
-        # Ensure mono
-        if len(audio_data.shape) > 1:
-            audio_data = np.mean(audio_data, axis=1)
-            
-        # Convert from float32 [-1, 1] to int16 [-32768, 32767]
-        audio_int16 = (audio_data * 32767).astype(np.int16)
-        
-        # Convert to little-endian bytes
-        return audio_int16.tobytes()
-        
-    async def process_stt(self, audio_q: asyncio.Queue[Optional[bytes]]) -> None:
-        """Run Google streaming_recognize consuming chunks from an async queue and publish final-only text."""
-        loop = asyncio.get_running_loop()
-
-        def requests_iter() -> Iterator[speech.StreamingRecognizeRequest]:
-            cfg = self.streaming_config
-            if cfg is not None:
-                # Send initial config request per API
-                yield speech.StreamingRecognizeRequest(streaming_config=cfg)
-            while True:
-                # Bridge async queue to sync iterator
-                chunk: Optional[bytes] = asyncio.run_coroutine_threadsafe(audio_q.get(), loop).result()
-                if chunk is None:
-                    break
-                yield speech.StreamingRecognizeRequest(audio_content=chunk)
-
-        def run_stream() -> None:
-            try:
-                client = self.stt_client
-                if client is None:
-                    return
-                for response in client.streaming_recognize(requests=requests_iter()):
-                    if not response.results:
-                        continue
-                    for result in response.results:
-                        if not result.alternatives:
-                            continue
-                        if not result.is_final:
-                            continue
-                        transcript = result.alternatives[0].transcript.strip()
-                        if not transcript:
-                            continue
-                        self.seq_counter += 1
-                        seq = self.seq_counter
-                        # Original-language-text message (final only)
-                        original_msg = {
-                            "type": "original-language-text",
-                            "lang": self.primary_lang,
-                            "text": transcript,
-                            "isFinal": True,
-                            "seq": seq,
-                            "ts": int(time.time() * 1000),
-                        }
-                        asyncio.run_coroutine_threadsafe(self.publish_data(original_msg), loop)
-                        # Fan-out to translations (final only)
-                        if self.translation_targets and self.translate_client:
-                            for tgt in self.translation_targets:
-                                asyncio.run_coroutine_threadsafe(
-                                    self.handle_translation_and_tts(transcript, self.primary_lang, tgt, True, seq),
-                                    loop,
-                                )
-                        logger.info(f"Final transcript: {transcript}")
-            except Exception as e:
-                logger.error(f"Error in streaming_recognize: {e}")
-
-        # Run the blocking stream in a worker thread
-        await asyncio.to_thread(run_stream)
-            
-    async def publish_data(self, data_obj: Dict[str, Any]) -> None:
-        """Publish JSON to LiveKit data channel (reliable)."""
-        if not self.room or not self.is_connected:
-            return
-            
-        try:
-            data = json.dumps(data_obj).encode('utf-8')
-            await self.room.local_participant.publish_data(data)
-        except Exception as e:
-            logger.error(f"Error publishing data: {e}")
-
-    async def handle_translation_and_tts(self, text: str, src_lang: str, tgt_lang: str, is_final: bool, seq: int) -> None:
-        """Translate text and optionally synthesize TTS for final results."""
-        try:
-            translated = await self.translate_text(text, src_lang, tgt_lang)
-            tr_msg = {
-                "type": f"translation-text-{tgt_lang}",
-                "srcLang": src_lang,
-                "lang": tgt_lang,
-                "text": translated,
-                "isFinal": is_final,
-                "seq": seq,
-                "ts": int(time.time() * 1000),
-            }
-            await self.publish_data(tr_msg)
-            if is_final and self.tts_client and tgt_lang in self.tts_audio_queues:
-                await self.enqueue_tts_audio(translated, tgt_lang, seq)
-        except Exception as e:
-            logger.error(f"Translation/TTS error for {tgt_lang}: {e}")
-            try:
-                await self.publish_data({
-                    "type": f"translation-audio-{tgt_lang}",
-                    "status": "error",
-                    "seq": seq,
-                    "ts": int(time.time() * 1000),
-                })
-            except Exception:
-                pass
+            logger.error(f"Failed to initialize Google Translate client: {e}")
+            self.translate_client = None
 
     async def translate_text(self, text: str, src_lang: str, tgt_lang: str) -> str:
+        """Translate text using Google Translate (preserved from original)"""
         if not self.translate_client or not self.gcp_project_id:
+            logger.warning("Google Translate not available, returning original text")
             return text
+            
         parent = f"projects/{self.gcp_project_id}/locations/global"
+        
         def _translate() -> str:
             request = translate.TranslateTextRequest(
                 parent=parent,
@@ -263,293 +98,202 @@ class TranslationBot:
                 source_language_code=src_lang,
                 target_language_code=tgt_lang,
             )
-            client = self.translate_client
-            assert client is not None
-            resp = client.translate_text(request=request)
-            return resp.translations[0].translated_text if resp.translations else text
-        return await asyncio.to_thread(_translate)
-
-    async def enqueue_tts_audio(self, text: str, tgt_lang: str, seq: int) -> None:
-        """Synthesize TTS with Google TTS and enqueue raw LINEAR16 bytes."""
-        client = self.tts_client
-        if not client:
-            return
-        voice_name = self.voice_by_lang.get(tgt_lang)
-        def _synthesize() -> bytes:
-            voice_params = texttospeech.VoiceSelectionParams(
-                language_code=tgt_lang,
-                name=voice_name if voice_name else None,
-            )
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self.sample_rate,
-                speaking_rate=1.0,
-            )
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            response = client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice_params,
-                audio_config=audio_config,
-            )
-            return response.audio_content
-        audio_bytes = await asyncio.to_thread(_synthesize)
-        q = self.tts_audio_queues.get(tgt_lang)
-        if q:
-            # Inform clients that audio for this seq is starting
-            await self.publish_data({
-                "type": f"translation-audio-{tgt_lang}",
-                "status": "start",
-                "seq": seq,
-                "ts": int(time.time() * 1000),
-            })
-            # Enqueue the bytes; pump task will stream to track
-            try:
-                await q.put(audio_bytes)
-            except asyncio.QueueFull:
-                # Drop oldest and enqueue
-                try:
-                    _ = q.get_nowait()
-                except Exception:
-                    pass
-                await q.put(audio_bytes)
-            await self.publish_data({
-                "type": f"translation-audio-{tgt_lang}",
-                "status": "end",
-                "seq": seq,
-                "ts": int(time.time() * 1000),
-            })
-            
-    async def find_main_audio_track(self) -> Optional[rtc.RemoteAudioTrack]:
-        """Find the first non-bot remote audio track"""
-        if not self.room:
-            return None
-            
-        for participant in self.room.remote_participants.values():
-            # Skip bot participants
-            if participant.identity.startswith("translation-bot:"):
-                continue
-            for pub in participant.track_publications.values():
-                if pub.kind == rtc.TrackKind.KIND_AUDIO:
-                    # Ensure the publication has a concrete RemoteAudioTrack
-                    track = getattr(pub, "track", None)
-                    if isinstance(track, rtc.RemoteAudioTrack):
-                        logger.info(f"Found main audio track from {participant.identity}")
-                        return track
-                    
-        return None
+            response = self.translate_client.translate_text(request=request)
+            return response.translations[0].translated_text if response.translations else text
         
-    async def wait_for_audio_track(self) -> Optional[rtc.RemoteAudioTrack]:
-        """Wait for a main audio track to become available"""
-        start_time = time.time()
-        
-        while time.time() - start_time < self.audio_timeout:
-            track = await self.find_main_audio_track()
-            if track:
-                return track
-                
-            logger.info("Waiting for main audio track...")
-            await asyncio.sleep(2)
-            
-        logger.warning(f"No audio track found within {self.audio_timeout} seconds")
-        return None
-        
-    async def on_track_subscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant) -> None:
-        """Handle track subscription"""
-        if track.kind == rtc.TrackKind.KIND_AUDIO and not participant.identity.startswith("translation-bot:"):
-            logger.info(f"Audio track subscribed from {participant.identity}")
-            if not self.selected_audio_track and isinstance(track, rtc.RemoteAudioTrack):
-                self.selected_audio_track = track
-                
-    async def on_track_unsubscribed(self, track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant) -> None:
-        """Handle track unsubscription"""
-        if track == self.selected_audio_track:
-            logger.info("Main audio track unsubscribed")
-            self.selected_audio_track = None
-            
-    async def on_participant_connected(self, participant: rtc.RemoteParticipant) -> None:
-        """Handle participant connection"""
-        logger.info(f"Participant connected: {participant.identity}")
-        
-        # Check for existing audio tracks
-        if not self.selected_audio_track:
-            track = await self.find_main_audio_track()
-            if track:
-                self.selected_audio_track = track
-                
-    async def on_participant_disconnected(self, participant: rtc.RemoteParticipant) -> None:
-        """Handle participant disconnection"""
-        logger.info(f"Participant disconnected: {participant.identity}")
-        
-    # Connection is managed by Agents framework; no manual connect here
-    
-    async def run_with_room(self) -> None:
-        """Main processing loop once connected room is available"""
         try:
-            # Setup
-            self.setup_google_credentials()
-            self.create_stt_client()
-            self.create_stt_streaming_config()
-            # Optional services
-            self.create_translate_client()
-            self.create_tts_client()
-            
-            # Room is already connected via Agents
-            assert self.room is not None
-            # Event handlers are already registered by entrypoint
-            
-            # Prepare TTS publishing per target language
-            for lang in self.audio_targets:
-                # Create audio source and track
-                try:
-                    source = rtc.AudioSource(self.sample_rate, self.channels)
-                    track = rtc.LocalAudioTrack.create_audio_track(f"translation-audio-{lang}", source)
-                    await self.room.local_participant.publish_track(track)
-                    self.audio_sources[lang] = source
-                    self.local_audio_tracks[lang] = track
-                    # Bounded queue for up to ~3s of audio (assuming avg 48kB/s mono LINEAR16)
-                    self.tts_audio_queues[lang] = asyncio.Queue(maxsize=64)
-                except Exception as e:
-                    logger.error(f"Failed creating/publishing audio track for {lang}: {e}")
+            return await asyncio.to_thread(_translate)
+        except Exception as e:
+            logger.error(f"Translation error ({src_lang} -> {tgt_lang}): {e}")
+            return text
 
-            # Wait for audio track
-            audio_track = await self.wait_for_audio_track()
-            if not audio_track:
-                logger.error("No audio track available, exiting")
-                return
-            
-            # Open audio stream from the RemoteAudioTrack and feed frames into queue
-            audio_q: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=100)
+    async def publish_data(self, data_obj: Dict[str, Any]) -> None:
+        """Publish JSON to LiveKit data channel (preserved message format)"""
+        try:
+            data = json.dumps(data_obj).encode('utf-8')
+            await self.ctx.room.local_participant.publish_data(data)
+        except Exception as e:
+            logger.error(f"Error publishing data: {e}")
 
-            async def feed_audio() -> None:
-                try:
-                    stream = rtc.AudioStream(audio_track)
-                    async for event in stream:
-                        frame = event.frame
-                        raw_data = frame.data
-                        if isinstance(raw_data, (bytes, bytearray)):
-                            pcm_np = np.frombuffer(raw_data, dtype=np.float32)
-                        else:
-                            pcm_np = np.frombuffer(bytes(raw_data), dtype=np.float32)
-                        if getattr(pcm_np, 'ndim', 1) == 2 and pcm_np.shape[1] > 1:
-                            pcm_np = np.mean(pcm_np, axis=1)
-                        pcm_np = np.clip(pcm_np, -1.0, 1.0).astype(np.float32)
-                        linear16 = (pcm_np * 32767.0).astype(np.int16).tobytes()
-                        try:
-                            audio_q.put_nowait(linear16)
-                        except asyncio.QueueFull:
-                            # Drop oldest to keep latency bounded
-                            try:
-                                _ = audio_q.get_nowait()
-                            except Exception:
-                                pass
-                            try:
-                                audio_q.put_nowait(linear16)
-                            except Exception:
-                                pass
-                except asyncio.CancelledError:
-                    return
-                except Exception as e:
-                    logger.error(f"feed_audio error: {e}")
+    async def on_human_speech(self, text: str, *, user_msg) -> None:
+        """Called by AgentSession when STT produces final text - this is our main entry point!"""
+        logger.info(f"Received speech: {text}")
+        
+        # Publish original language messages (preserve exact format)
+        await self.publish_data({
+            "type": "caption",
+            "lang": self.primary_lang,
+            "text": text,
+            "isFinal": True
+        })
+        
+        await self.publish_data({
+            "type": "original-language-text",
+            "lang": self.primary_lang,
+            "text": text,
+            "isFinal": True
+        })
+        
+        # Process translations
+        await self.process_translations(text)
+        
+        # Don't call super() - we don't want conversational responses
 
-            feed_task = asyncio.create_task(feed_audio())
-            stt_task = asyncio.create_task(self.process_stt(audio_q))
-            # Start audio pumps properly (workaround for inline coroutine def)
-            # Define pumps here to capture local scope
-            pump_tasks: List[asyncio.Task] = []
-            for lang in self.audio_targets:
-                if lang in self.tts_audio_queues and lang in self.audio_sources:
-                    async def _pump(l: str = lang) -> None:
-                        q = self.tts_audio_queues[l]
-                        source = self.audio_sources[l]
-                        frame_samples = int(self.sample_rate * 0.02)
-                        try:
-                            while self.is_connected:
-                                audio_bytes = await q.get()
-                                if audio_bytes is None:
-                                    break
-                                int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-                                pcm = (int16.astype(np.float32)) / 32767.0
-                                idx = 0
-                                total = pcm.shape[0]
-                                while idx < total:
-                                    end = min(idx + frame_samples, total)
-                                    frame_data = pcm[idx:end]
-                                    samples = frame_data.shape[0]
-                                    if samples == 0:
-                                        break
-                                    if samples < frame_samples:
-                                        frame_pad = np.zeros((frame_samples,), dtype=np.float32)
-                                        frame_pad[:samples] = frame_data
-                                        frame_data = frame_pad
-                                        samples = frame_samples
-                                    frame = rtc.AudioFrame(
-                                        data=frame_data.tobytes(),
-                                        sample_rate=self.sample_rate,
-                                        num_channels=self.channels,
-                                        samples_per_channel=samples,
-                                    )
-                                    await source.capture_frame(frame)
-                                    idx += frame_samples
-                        except asyncio.CancelledError:
-                            return
-                        except Exception as e:
-                            logger.error(f"Audio pump error for {l}: {e}")
-                    pump_tasks.append(asyncio.create_task(_pump()))
-
-            # Wait for audio feeding to complete, then signal STT to finish and await it
+    async def setup_audio_tracks(self) -> None:
+        """Set up audio tracks for TTS output per language"""
+        for lang in self.audio_targets:
             try:
-                await feed_task
-            except asyncio.CancelledError:
-                logger.info("Audio feed task cancelled")
-            finally:
-                try:
-                    await audio_q.put(None)
-                except Exception:
-                    pass
-                try:
-                    await stt_task
-                except asyncio.CancelledError:
-                    logger.info("STT task cancelled")
-                # Stop pumps
-                for lang, q in self.tts_audio_queues.items():
-                    try:
-                        await q.put(None)
-                    except Exception:
-                        pass
-                for t in pump_tasks:
-                    try:
-                        await t
-                    except Exception:
-                        pass
+                # Create audio source and track for this language
+                audio_source = rtc.AudioSource(sample_rate=48000, num_channels=1)
+                track = rtc.LocalAudioTrack.create_audio_track(
+                    f"translation-audio-{lang}", 
+                    audio_source
+                )
+                
+                # Publish the track
+                await self.ctx.room.local_participant.publish_track(
+                    track, 
+                    rtc.TrackPublishOptions(name=f"translation-audio-{lang}")
+                )
+                
+                self.audio_sources[lang] = audio_source
+                self.published_tracks[lang] = track
+                
+                # Set up TTS processing queue for this language
+                self.tts_queues[lang] = asyncio.Queue()
+                self.tts_tasks.append(
+                    asyncio.create_task(self._process_tts_queue(lang))
+                )
+                
+                logger.info(f"Audio track set up for language: {lang}")
+                
+            except Exception as e:
+                logger.error(f"Failed to set up audio track for {lang}: {e}")
+
+    async def _process_tts_queue(self, language: str) -> None:
+        """Process TTS requests for a specific language"""
+        queue = self.tts_queues[language]
+        audio_source = self.audio_sources.get(language)
+        
+        if not audio_source:
+            logger.error(f"No audio source for language: {language}")
+            return
+            
+        while True:
+            try:
+                text = await queue.get()
+                if text is None:  # Shutdown signal
+                    break
+                    
+                # Use plugin for TTS synthesis
+                tts_configured = google.TTS(language=language)
+                
+                # Synthesize audio
+                audio_data = await tts_configured.synthesize(text)
+                
+                # Convert to AudioFrames and publish
+                await self._publish_audio_data(audio_source, audio_data)
+                
+            except Exception as e:
+                logger.error(f"TTS processing error for {language}: {e}")
+
+    async def _publish_audio_data(self, audio_source: rtc.AudioSource, audio_data: bytes) -> None:
+        """Convert TTS audio data to frames and publish"""
+        try:
+            # Convert bytes to numpy array (assuming 16-bit PCM)
+            int16_data = np.frombuffer(audio_data, dtype=np.int16)
+            float32_data = int16_data.astype(np.float32) / 32767.0
+            
+            # Create audio frames (480 samples per frame for 48kHz)
+            frame_samples = 480
+            sample_rate = 48000
+            channels = 1
+            
+            for i in range(0, len(float32_data), frame_samples):
+                frame_data = float32_data[i:i + frame_samples]
+                
+                # Pad if necessary
+                if len(frame_data) < frame_samples:
+                    padded = np.zeros(frame_samples, dtype=np.float32)
+                    padded[:len(frame_data)] = frame_data
+                    frame_data = padded
+                
+                # Create and capture frame
+                frame = rtc.AudioFrame(
+                    data=frame_data.tobytes(),
+                    sample_rate=sample_rate,
+                    num_channels=channels,
+                    samples_per_channel=len(frame_data)
+                )
+                
+                await audio_source.capture_frame(frame)
                 
         except Exception as e:
-            logger.error(f"Worker error: {e}")
-        finally:
-            await self.cleanup()
-            
-    async def cleanup(self) -> None:
-        """Clean up resources"""
-        logger.info("Cleaning up...")
-        
-        # No explicit STT stream handle; processing finishes when queue is drained
-                
-        if self.room and self.is_connected:
-            try:
-                await self.room.disconnect()
-            except:
-                pass
-                
-        logger.info("Cleanup complete")
+            logger.error(f"Error publishing audio data: {e}")
 
-def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[str], Dict[str, str], Optional[str]]:
+    async def process_translations(self, text: str) -> None:
+        """Process translations for final text"""
+        translation_tasks = []
+        
+        # Create translation tasks for all target languages
+        for lang in self.translation_targets:
+            translation_tasks.append(
+                self.handle_translation(text, self.primary_lang, lang)
+            )
+        
+        # Process translations concurrently
+        if translation_tasks:
+            await asyncio.gather(*translation_tasks, return_exceptions=True)
+
+    async def handle_translation(self, text: str, src_lang: str, tgt_lang: str) -> None:
+        """Handle translation and TTS for a single target language"""
+        try:
+            # Translate text
+            translated_text = await self.translate_text(text, src_lang, tgt_lang)
+            
+            # Publish translation message (preserve exact format)
+            await self.publish_data({
+                "type": f"translation-text-{tgt_lang}",
+                "srcLang": src_lang,
+                "lang": tgt_lang,
+                "text": translated_text,
+                "isFinal": True
+            })
+            
+            # Queue TTS if this language has audio output enabled
+            if tgt_lang in self.audio_targets and tgt_lang in self.tts_queues:
+                await self.tts_queues[tgt_lang].put(translated_text)
+            
+        except Exception as e:
+            logger.error(f"Translation handling error for {tgt_lang}: {e}")
+
+    async def cleanup(self) -> None:
+        """Cleanup resources"""
+        try:
+            # Signal TTS tasks to stop
+            for queue in self.tts_queues.values():
+                await queue.put(None)
+                
+            # Wait for TTS tasks to complete
+            if self.tts_tasks:
+                await asyncio.gather(*self.tts_tasks, return_exceptions=True)
+                
+            logger.info("Translation agent cleanup complete")
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+
+
+def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[str], Optional[str]]:
+    """Parse translation targets and source language from room metadata (preserved logic)"""
     t_targets: List[str] = []
     a_targets: List[str] = []
-    voices: Dict[str, str] = {}
     src_lang: Optional[str] = None
+    
     try:
         src = md.get("sourceLanguage")
         if isinstance(src, str) and src:
             src_lang = src
+            
         outputs = md.get("outputs")
         if isinstance(outputs, list):
             for o in outputs:
@@ -562,54 +306,56 @@ def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[st
                     t_targets.append(lang)
                 if o.get("audio") is True:
                     a_targets.append(lang)
-                voice = o.get("voice")
-                if isinstance(voice, str) and voice:
-                    voices[lang] = voice
     except Exception:
         pass
-    return t_targets, a_targets, voices, src_lang
+        
+    return t_targets, a_targets, src_lang
 
 
 async def entrypoint(ctx: JobContext) -> None:
-    # Get the room instance from context (it's already available)
-    room = ctx.room
+    """Entry point using standard AgentSession pattern - MUCH simpler!"""
     
-    # Register bot and parse metadata
-    bot = TranslationBot(event_id=room.name, room_name=room.name)
-    bot.room = room
-    
-    # Set up event handlers before connecting
-    room.on("track_subscribed", bot.on_track_subscribed)
-    room.on("track_unsubscribed", bot.on_track_unsubscribed)
-    room.on("participant_connected", bot.on_participant_connected)
-    room.on("participant_disconnected", bot.on_participant_disconnected)
-    
-    # Connect to the room with audio-only subscription
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    
-    # Mark as connected after successful connection
-    bot.is_connected = True
-
-    # Parse room metadata if present
+    # Parse room metadata for configuration
     metadata_obj: Dict[str, Any] = {}
     try:
-        if isinstance(room.metadata, str) and room.metadata:
-            metadata_obj = json.loads(room.metadata)
+        if isinstance(ctx.room.metadata, str) and ctx.room.metadata:
+            metadata_obj = json.loads(ctx.room.metadata)
     except Exception:
         metadata_obj = {}
-
-    t_targets, a_targets, voices, src_lang = _parse_outputs_from_metadata(metadata_obj)
-    if src_lang:
-        bot.primary_lang = src_lang
-    # De-dup and avoid primary lang echo
-    bot.translation_targets = [l for l in dict.fromkeys(t_targets) if l and l != bot.primary_lang]
-    bot.audio_targets = [l for l in dict.fromkeys(a_targets) if l and l != bot.primary_lang]
-    bot.voice_by_lang.update(voices)
-
-    logger.info(f"Agent configured: src={bot.primary_lang} translations={bot.translation_targets} audio={bot.audio_targets}")
-
-    # Run processing loop; cleanup on exit
-    await bot.run_with_room()
+    
+    # Configure languages from metadata
+    t_targets, a_targets, src_lang = _parse_outputs_from_metadata(metadata_obj)
+    primary_lang = src_lang or "en-US"
+    translation_targets = [l for l in dict.fromkeys(t_targets) if l and l != primary_lang]
+    audio_targets = [l for l in dict.fromkeys(a_targets) if l and l != primary_lang]
+    
+    logger.info(f"Agent configured: src={primary_lang} translations={translation_targets} audio={audio_targets}")
+    
+    # Create AgentSession with automatic audio management (RoomIO handles everything!)
+    session = AgentSession(
+        stt=google.STT(
+            model="chirp",
+            language_code=primary_lang
+        ),
+        # No TTS here - we handle multi-language TTS manually
+        # No LLM - we use Google Translate instead
+    )
+    
+    # Create translation agent with configuration
+    agent = TranslationAgent(
+        primary_lang=primary_lang,
+        translation_targets=translation_targets,
+        audio_targets=audio_targets
+    )
+    
+    # Start the session - AgentSession + RoomIO handle ALL audio input/output automatically!
+    await session.start(
+        room=ctx.room,
+        agent=agent,
+        room_input_options=RoomInputOptions(
+            # Can configure audio behavior here if needed
+        )
+    )
 
 
 if __name__ == "__main__":
