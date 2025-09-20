@@ -6,9 +6,15 @@ export type InputChannel = {
 }
 
 export const LivekitAdminService = {
-  async connect(url: string, token: string, onDisconnected?: () => void): Promise<Room> {
+  async connect(url: string | null | undefined, token: unknown, onDisconnected?: () => void): Promise<Room> {
+    if (!url) throw new Error('LiveKit URL is not configured')
+    const tokenStr = typeof token === 'string'
+      ? token
+      : (token && typeof token === 'object' && 'token' in (token as any))
+      ? String((token as any).token)
+      : (() => { throw new Error('Invalid LiveKit token') })()
     const room = new Room()
-    await room.connect(url, token, { autoSubscribe: true })
+    await room.connect(url, tokenStr, { autoSubscribe: true })
     if (onDisconnected) {
       room.on(RoomEvent.Disconnected, () => {
         try { onDisconnected() } catch {}
