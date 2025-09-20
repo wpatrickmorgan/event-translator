@@ -49,6 +49,7 @@ class TranslationAgent(Agent):
         self.published_tracks: Dict[str, rtc.LocalAudioTrack] = {}
         self.tts_queues: Dict[str, asyncio.Queue[Optional[str]]] = {}
         self.tts_tasks: List[asyncio.Task[Any]] = []
+        self.tts_clients: Dict[str, Any] = {}  # Pre-configured TTS clients per language
         
     async def astart(self, ctx: Any) -> None:
         """Called when agent starts - set up translation services"""
@@ -144,6 +145,17 @@ class TranslationAgent(Agent):
 
     async def setup_audio_tracks(self) -> None:
         """Set up audio tracks for TTS output per language"""
+        # Set up TTS credentials once
+        tts_base_kwargs = {}
+        credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+        if credentials_json:
+            try:
+                credentials_info = json.loads(credentials_json)
+                tts_base_kwargs["credentials_info"] = credentials_info
+                logger.info("Using Google credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON for TTS")
+            except Exception as e:
+                logger.warning(f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON for TTS: {e}")
+        
         for lang in self.audio_targets:
             try:
                 # Create audio source and track for this language
@@ -160,13 +172,22 @@ class TranslationAgent(Agent):
                 self.audio_sources[lang] = audio_source
                 self.published_tracks[lang] = track
                 
+                # Set up TTS client for this language
+                if "credentials_info" in tts_base_kwargs:
+                    self.tts_clients[lang] = google.TTS(
+                        language=lang,
+                        credentials_info=tts_base_kwargs["credentials_info"]
+                    )
+                else:
+                    self.tts_clients[lang] = google.TTS(language=lang)
+                
                 # Set up TTS processing queue for this language
                 self.tts_queues[lang] = asyncio.Queue[Optional[str]]()
                 self.tts_tasks.append(
                     asyncio.create_task(self._process_tts_queue(lang))
                 )
                 
-                logger.info(f"Audio track set up for language: {lang}")
+                logger.info(f"Audio track and TTS client set up for language: {lang}")
                 
             except Exception as e:
                 logger.error(f"Failed to set up audio track for {lang}: {e}")
@@ -175,9 +196,14 @@ class TranslationAgent(Agent):
         """Process TTS requests for a specific language"""
         queue = self.tts_queues[language]
         audio_source = self.audio_sources.get(language)
+        tts_client = self.tts_clients.get(language)
         
         if not audio_source:
             logger.error(f"No audio source for language: {language}")
+            return
+            
+        if not tts_client:
+            logger.error(f"No TTS client configured for language: {language}")
             return
             
         while True:
@@ -185,12 +211,9 @@ class TranslationAgent(Agent):
                 text = await queue.get()
                 if text is None:  # Shutdown signal
                     break
-                    
-                # Use plugin for TTS synthesis
-                tts_configured = google.TTS(language=language)
                 
                 # Synthesize audio - TTS.synthesize returns a stream, not awaitable
-                stream = tts_configured.synthesize(text)
+                stream = tts_client.synthesize(text)
                 audio_data = b""
                 async for chunk in stream:
                     # chunk is a SynthesizedAudio object, get the raw data
@@ -331,7 +354,7 @@ async def entrypoint(ctx: JobContext) -> None:
             metadata_obj = json.loads(ctx.room.metadata)
     except Exception:
         metadata_obj = {}
-
+    
     # Configure languages from metadata
     t_targets, a_targets, src_lang = _parse_outputs_from_metadata(metadata_obj)
     primary_lang = src_lang or "en-US"
@@ -340,12 +363,37 @@ async def entrypoint(ctx: JobContext) -> None:
     
     logger.info(f"Agent configured: src={primary_lang} translations={translation_targets} audio={audio_targets}")
     
-    # Create AgentSession with automatic audio management (RoomIO handles everything!)
-    session: AgentSession = AgentSession(
-        stt=google.STT(
+    # Set up Google Cloud credentials for STT
+    # Try to get credentials from environment (same as Google Translate setup)
+    credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if credentials_json:
+        try:
+            credentials_info = json.loads(credentials_json)
+            logger.info("Using Google credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON for STT")
+            # Create STT with explicit credentials
+            stt = google.STT(
+                model="chirp",
+                languages=[primary_lang],
+                credentials_info=credentials_info
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON for STT: {e}")
+            # Fall back to default credentials
+            stt = google.STT(
+                model="chirp",
+                languages=[primary_lang]
+            )
+    else:
+        logger.info("No GOOGLE_APPLICATION_CREDENTIALS_JSON found, using default credentials for STT")
+        # Use default credentials
+        stt = google.STT(
             model="chirp",
             languages=[primary_lang]
-        ),
+        )
+    
+    # Create AgentSession with automatic audio management (RoomIO handles everything!)
+    session: AgentSession = AgentSession(
+        stt=stt,
         # No TTS here - we handle multi-language TTS manually
         # No LLM - we use Google Translate instead
     )
