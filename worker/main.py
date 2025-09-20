@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 import uvicorn
 
-from livekit import rtc, api as lk_api
-from livekit.rtc import DataPacketKind
+from livekit import api as lk_api
+from livekit.agents import rtc
 from google.cloud import speech
 from google.cloud import texttospeech
 from google.cloud import translate_v3 as translate
@@ -217,7 +217,7 @@ class TranslationBot:
             data = json.dumps(data_obj).encode('utf-8')
             await self.room.local_participant.publish_data(
                 data,
-                kind=DataPacketKind.RELIABLE,
+                kind=rtc.DataPacketKind.RELIABLE,
             )
         except Exception as e:
             logger.error(f"Error publishing data: {e}")
@@ -396,20 +396,11 @@ class TranslationBot:
             # Connect to room
             self.room = rtc.Room()
 
-            # Set up event handlers using sync wrappers that schedule async callbacks
-            def _track_subscribed(track, publication, participant):
-                asyncio.create_task(self.on_track_subscribed(track, publication, participant))
-            def _track_unsubscribed(track, publication, participant):
-                asyncio.create_task(self.on_track_unsubscribed(track, publication, participant))
-            def _participant_connected(participant):
-                asyncio.create_task(self.on_participant_connected(participant))
-            def _participant_disconnected(participant):
-                asyncio.create_task(self.on_participant_disconnected(participant))
-
-            self.room.on("track_subscribed", _track_subscribed)
-            self.room.on("track_unsubscribed", _track_unsubscribed)
-            self.room.on("participant_connected", _participant_connected)
-            self.room.on("participant_disconnected", _participant_disconnected)
+            # Register async event handlers directly
+            self.room.on("track_subscribed", self.on_track_subscribed)
+            self.room.on("track_unsubscribed", self.on_track_unsubscribed)
+            self.room.on("participant_connected", self.on_participant_connected)
+            self.room.on("participant_disconnected", self.on_participant_disconnected)
 
             await self.room.connect(self.livekit_url, jwt_token)
             self.is_connected = True
@@ -460,36 +451,32 @@ class TranslationBot:
 
             async def feed_audio():
                 try:
-                    # Use standard context manager for AudioStream; iterate events asynchronously
-                    try:
-                        with rtc.AudioStream(audio_track) as stream:
-                            async for event in stream:
-                                frame = event.frame
-                                pcm = frame.data
-                                if isinstance(pcm, (bytes, bytearray)):
-                                    pcm = np.frombuffer(pcm, dtype=np.float32)
-                                if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
-                                    pcm = np.mean(pcm, axis=1)
-                                pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
-                                linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
-                                await audio_q.put(linear16)
-                    except (AttributeError, TypeError):
-                        # Fallback for SDK variants without context manager support
-                        stream = getattr(rtc.AudioStream, 'from_track', None)
-                        if callable(stream):
-                            s = stream(audio_track)
-                            async for event in s:
-                                frame = event.frame
-                                pcm = frame.data
-                                if isinstance(pcm, (bytes, bytearray)):
-                                    pcm = np.frombuffer(pcm, dtype=np.float32)
-                                if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
-                                    pcm = np.mean(pcm, axis=1)
-                                pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
-                                linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
-                                await audio_q.put(linear16)
+                    stream = rtc.AudioStream(audio_track)
+                    async for event in stream:
+                        frame = event.frame
+                        pcm = frame.data
+                        if isinstance(pcm, (bytes, bytearray)):
+                            pcm = np.frombuffer(pcm, dtype=np.float32)
+                        if getattr(pcm, 'ndim', 1) == 2 and pcm.shape[1] > 1:
+                            pcm = np.mean(pcm, axis=1)
+                        pcm = np.clip(pcm, -1.0, 1.0).astype(np.float32)
+                        linear16 = (pcm * 32767.0).astype(np.int16).tobytes()
+                        try:
+                            audio_q.put_nowait(linear16)
+                        except asyncio.QueueFull:
+                            # Drop oldest to keep latency bounded
+                            try:
+                                _ = audio_q.get_nowait()
+                            except Exception:
+                                pass
+                            try:
+                                audio_q.put_nowait(linear16)
+                            except Exception:
+                                pass
                 except asyncio.CancelledError:
                     return
+                except Exception as e:
+                    logger.error(f"feed_audio error: {e}")
 
             feed_task = asyncio.create_task(feed_audio())
             stt_task = asyncio.create_task(self.process_stt(audio_q))
@@ -653,7 +640,15 @@ class SessionSupervisor:
     def list(self):
         out = []
         for k, t in self.sessions.items():
-            out.append({"roomName": k, "running": not t.done()})
+            bot = self.bots.get(k)
+            out.append({
+                "roomName": k,
+                "running": not t.done(),
+                "connected": bool(bot and bot.is_connected),
+                "sourceLanguage": getattr(bot, "primary_lang", None) if bot else None,
+                "translationTargets": list(getattr(bot, "translation_targets", [])) if bot else [],
+                "audioTargets": list(getattr(bot, "audio_targets", [])) if bot else [],
+            })
         return out
 
 app = FastAPI()
@@ -661,7 +656,19 @@ supervisor = SessionSupervisor()
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    sessions = supervisor.list()
+    connected = sum(1 for s in sessions if s.get("connected"))
+    lk_url_configured = bool(os.getenv("LIVEKIT_URL") or os.getenv("NEXT_PUBLIC_LIVEKIT_URL") or os.getenv("LIVEKIT_SERVER_URL"))
+    return {
+        "ok": True,
+        "livekit": {
+            "urlConfigured": lk_url_configured,
+            "apiKeyConfigured": bool(os.getenv("LIVEKIT_API_KEY")),
+            "apiSecretConfigured": bool(os.getenv("LIVEKIT_API_SECRET")),
+        },
+        "sessions": sessions,
+        "connectedSessions": connected,
+    }
 
 @app.get("/sessions")
 async def sessions():
@@ -677,6 +684,19 @@ async def stop_session(body: StopSessionBody):
 
 def main():
     """If launched directly, run as a supervisor HTTP server."""
+    if os.getenv("AGENTS_ENTRYPOINT") == "1":
+        try:
+            # Optional: experimental agents entrypoint to ease migration path
+            from livekit.agents import cli, WorkerOptions  # type: ignore
+
+            async def _noop(_ctx):
+                # Placeholder entrypoint; keep FastAPI supervisor as primary
+                await asyncio.sleep(0.1)
+
+            cli.run_app(WorkerOptions(entrypoint_fnc=_noop))
+            return
+        except Exception as e:
+            logger.error(f"Agents entrypoint failed, falling back to FastAPI: {e}")
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 if __name__ == "__main__":
