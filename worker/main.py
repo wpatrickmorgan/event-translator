@@ -143,20 +143,34 @@ class TranslationWorker:
                 self.audio_sources[lang] = audio_source
                 self.published_tracks[lang] = track
                 
-                # Initialize TTS client with hardcoded Spanish voice for testing
-                tts_kwargs = {
-                    "language": lang,
-                }
-                
+                # Initialize TTS client with voice selection
                 # TEMPORARY: Hardcode Spanish voice for testing
                 if lang.startswith("es"):
-                    tts_kwargs["voice"] = "es-ES-Chirp-HD-D"
-                    logger.info(f"Using hardcoded Spanish voice 'es-ES-Chirp-HD-D' for {lang}")
+                    voice_name = "es-ES-Chirp-HD-D"
+                    logger.info(f"Using hardcoded Spanish voice '{voice_name}' for {lang}")
+                    if credentials_info:
+                        self.tts_clients[lang] = google.TTS(
+                            language=lang,
+                            voice_name=voice_name,
+                            credentials_info=credentials_info
+                        )
+                    else:
+                        self.tts_clients[lang] = google.TTS(
+                            language=lang,
+                            voice_name=voice_name
+                        )
+                else:
+                    # Use default voice for other languages
+                    if credentials_info:
+                        self.tts_clients[lang] = google.TTS(
+                            language=lang,
+                            credentials_info=credentials_info
+                        )
+                    else:
+                        self.tts_clients[lang] = google.TTS(language=lang)
                 
-                if credentials_info:
-                    tts_kwargs["credentials_info"] = credentials_info
-                
-                self.tts_clients[lang] = google.TTS(**tts_kwargs)
+                # Log language setup
+                logger.info(f"TTS client set up for language: {lang}")
                 
                 # Set up TTS queue and processing task
                 self.tts_queues[lang] = asyncio.Queue()
