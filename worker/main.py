@@ -17,7 +17,7 @@ import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from livekit import rtc
-from livekit.agents import cli, WorkerOptions, JobContext
+from livekit.agents import cli, WorkerOptions, JobContext, AutoSubscribe
 from google.cloud import speech
 from google.cloud import texttospeech
 from google.cloud import translate_v3 as translate
@@ -571,32 +571,30 @@ def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[st
 
 
 async def entrypoint(ctx: JobContext) -> None:
-    # Determine room name from job context
-    room_name: Optional[str] = getattr(getattr(ctx, "job", None), "room_name", None)
-
-    # Connect to the room using Agents context (identity handled by framework)
-    _room = await ctx.connect()
-    room_obj: Optional[rtc.Room] = _room if isinstance(_room, rtc.Room) else cast(Optional[rtc.Room], getattr(ctx, "room", None))
-    if room_obj is None:
-        logger.error("ctx.connect did not yield a room; aborting job")
-        return
-
+    # Get the room instance from context (it's already available)
+    room = ctx.room
+    
     # Register bot and parse metadata
-    bot = TranslationBot(event_id=room_name or room_obj.name or "", room_name=room_obj.name)
-    bot.room = room_obj
+    bot = TranslationBot(event_id=room.name, room_name=room.name)
+    bot.room = room
+    
+    # Set up event handlers before connecting
+    room.on("track_subscribed", bot.on_track_subscribed)
+    room.on("track_unsubscribed", bot.on_track_unsubscribed)
+    room.on("participant_connected", bot.on_participant_connected)
+    room.on("participant_disconnected", bot.on_participant_disconnected)
+    
+    # Connect to the room with audio-only subscription
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    
+    # Mark as connected after successful connection
     bot.is_connected = True
-
-    # Register async event handlers
-    room_obj.on("track_subscribed", bot.on_track_subscribed)
-    room_obj.on("track_unsubscribed", bot.on_track_unsubscribed)
-    room_obj.on("participant_connected", bot.on_participant_connected)
-    room_obj.on("participant_disconnected", bot.on_participant_disconnected)
 
     # Parse room metadata if present
     metadata_obj: Dict[str, Any] = {}
     try:
-        if isinstance(room_obj.metadata, str) and room_obj.metadata:
-            metadata_obj = json.loads(room_obj.metadata)
+        if isinstance(room.metadata, str) and room.metadata:
+            metadata_obj = json.loads(room.metadata)
     except Exception:
         metadata_obj = {}
 
