@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Room, RoomEvent, LocalAudioTrack } from 'livekit-client'
+import { Room, LocalAudioTrack } from 'livekit-client'
 import { LivekitService } from '@/lib/services/livekitService'
 import { LivekitAdminService } from '@/lib/services/livekitAdminService'
 import { useAudioLevelMeter } from '@/hooks/useAudioLevelMeter'

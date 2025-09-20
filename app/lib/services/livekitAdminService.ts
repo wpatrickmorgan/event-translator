@@ -10,8 +10,8 @@ export const LivekitAdminService = {
     if (!url) throw new Error('LiveKit URL is not configured')
     const tokenStr = typeof token === 'string'
       ? token
-      : (token && typeof token === 'object' && 'token' in (token as any))
-      ? String((token as any).token)
+      : (token && typeof token === 'object' && 'token' in token)
+      ? String((token as { token: unknown }).token)
       : (() => { throw new Error('Invalid LiveKit token') })()
     const room = new Room()
     await room.connect(url, tokenStr, { autoSubscribe: true })
