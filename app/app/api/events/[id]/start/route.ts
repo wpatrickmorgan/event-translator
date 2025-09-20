@@ -50,36 +50,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .eq('id', eventId)
   if (updErr) return NextResponse.json({ error: 'Failed to update status' }, { status: 500 })
 
-  const workerUrl = process.env.WORKER_PUBLIC_URL
-  if (!workerUrl) {
-    return NextResponse.json({ error: 'WORKER_PUBLIC_URL not configured' }, { status: 500 })
-  }
-  try {
-    const resp = await fetch(`${workerUrl.replace(/\/$/, '')}/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify({
-        eventId,
-        roomName: event.room_name,
-        metadata: {
-          outputs: (langs || []).map(l => ({
-            lang: l.language.code,
-            captions: l.mode === 'captions_only' || l.mode === 'both',
-            audio: l.mode === 'audio_only' || l.mode === 'both',
-            voice: (l as { voice_id?: string }).voice_id ?? undefined,
-          })),
-        },
-      }),
-    })
-    if (!resp.ok) {
-      const text = await resp.text()
-      return NextResponse.json({ error: `Worker start failed: ${resp.status} ${text}` }, { status: 500 })
-    }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to contact worker'
-    return NextResponse.json({ error: message }, { status: 500 })
-  }
+  // Agents framework handles worker dispatch automatically once the room exists
 
   return NextResponse.json({ ok: true })
 }

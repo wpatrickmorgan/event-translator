@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-LiveKit Translation Bot Worker
+LiveKit Translation Bot Agent (Agents Framework)
 
-Joins a LiveKit room as a bot, streams audio to Google Cloud STT, publishes
-final-only original-language text, translates final results to configured targets,
-and optionally publishes per-language TTS audio tracks.
+Runs as an Agents worker job participant, streams audio to Google Cloud STT,
+publishes final-only original-language text, translates final results to
+configured targets, and optionally publishes per-language TTS audio tracks.
 """
 
 import asyncio
@@ -15,12 +15,10 @@ import time
 from typing import Optional, Dict, Any, List, Tuple
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
-from fastapi import FastAPI
-from pydantic import BaseModel
-import uvicorn
 
 from livekit import api as lk_api
 from livekit.agents import rtc
+from livekit.agents import cli, WorkerOptions, JobContext
 from google.cloud import speech
 from google.cloud import texttospeech
 from google.cloud import translate_v3 as translate
@@ -61,7 +59,7 @@ class TranslationBot:
         self.streaming_config = None
         self.translate_client: Optional[translate.TranslationServiceClient] = None
         self.tts_client: Optional[texttospeech.TextToSpeechClient] = None
-        self.room = None
+        self.room: Optional[rtc.Room] = None
         # Selected main remote audio track (not publication)
         self.selected_audio_track: Optional[rtc.RemoteAudioTrack] = None
         self.seq_counter = 0
@@ -376,43 +374,10 @@ class TranslationBot:
         """Handle participant disconnection"""
         logger.info(f"Participant disconnected: {participant.identity}")
         
-    async def connect_to_room(self):
-        """Connect to LiveKit room"""
-        try:
-            # Create JWT token using server credentials with room grants
-            jwt_token = (
-                lk_api.AccessToken(self.livekit_api_key, self.livekit_api_secret)
-                .with_identity(f"translation-bot:{self.event_id}")
-                .with_grants(lk_api.VideoGrants(
-                    room=self.room_name,
-                    room_join=True,
-                    can_subscribe=True,
-                    can_publish=True,
-                    can_publish_data=True,
-                ))
-                .to_jwt()
-            )
-
-            # Connect to room
-            self.room = rtc.Room()
-
-            # Register async event handlers directly
-            self.room.on("track_subscribed", self.on_track_subscribed)
-            self.room.on("track_unsubscribed", self.on_track_unsubscribed)
-            self.room.on("participant_connected", self.on_participant_connected)
-            self.room.on("participant_disconnected", self.on_participant_disconnected)
-
-            await self.room.connect(self.livekit_url, jwt_token)
-            self.is_connected = True
-
-            logger.info(f"Connected to room: {self.room_name} as translation-bot:{self.event_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to connect to room: {e}")
-            raise
+    # Connection is managed by Agents framework; no manual connect here
     
-    async def run(self):
-        """Main worker loop"""
+    async def run_with_room(self):
+        """Main processing loop once connected room is available"""
         try:
             # Setup
             self.setup_google_credentials()
@@ -422,9 +387,9 @@ class TranslationBot:
             self.create_translate_client()
             self.create_tts_client()
             
-            # Connect to room
-            await self.connect_to_room()
-            # Metadata is supplied via /start; no LiveKit metadata fetch
+            # Room is already connected via Agents
+            assert self.room is not None
+            # Event handlers are already registered by entrypoint
             
             # Prepare TTS publishing per target language
             for lang in self.audio_targets:
@@ -568,136 +533,71 @@ class TranslationBot:
                 
         logger.info("Cleanup complete")
 
-class StartSessionBody(BaseModel):
-    eventId: str
-    roomName: str
-    metadata: Dict[str, Any] | None = None
+def _parse_outputs_from_metadata(md: Dict[str, Any]) -> Tuple[List[str], List[str], Dict[str, str], Optional[str]]:
+    t_targets: List[str] = []
+    a_targets: List[str] = []
+    voices: Dict[str, str] = {}
+    src_lang: Optional[str] = None
+    try:
+        src = md.get("sourceLanguage")
+        if isinstance(src, str) and src:
+            src_lang = src
+        outputs = md.get("outputs")
+        if isinstance(outputs, list):
+            for o in outputs:
+                if not isinstance(o, dict):
+                    continue
+                lang = o.get("lang")
+                if not isinstance(lang, str) or not lang:
+                    continue
+                if o.get("captions") is True:
+                    t_targets.append(lang)
+                if o.get("audio") is True:
+                    a_targets.append(lang)
+                voice = o.get("voice")
+                if isinstance(voice, str) and voice:
+                    voices[lang] = voice
+    except Exception:
+        pass
+    return t_targets, a_targets, voices, src_lang
 
-class StopSessionBody(BaseModel):
-    roomName: str
 
-class SessionSupervisor:
-    def __init__(self) -> None:
-        self.sessions: Dict[str, asyncio.Task] = {}
-        self.bots: Dict[str, TranslationBot] = {}
+async def entrypoint(ctx: JobContext):
+    # Connect to the room using Agents context
+    room = await ctx.connect()
 
-    async def start(self, body: StartSessionBody):
-        key = body.roomName
-        if key in self.sessions and not self.sessions[key].done():
-            return {"status": "already_running"}
-        bot = TranslationBot(event_id=body.eventId, room_name=body.roomName)
-        # Apply metadata from request if provided
-        if body.metadata and isinstance(body.metadata, dict):
-            try:
-                src = body.metadata.get("sourceLanguage")
-                if isinstance(src, str) and src:
-                    bot.primary_lang = src
-                outputs = body.metadata.get("outputs")
-                if isinstance(outputs, list):
-                    t_targets: List[str] = []
-                    a_targets: List[str] = []
-                    for o in outputs:
-                        if not isinstance(o, dict):
-                            continue
-                        lang = o.get("lang")
-                        if not isinstance(lang, str) or not lang:
-                            continue
-                        if o.get("captions") is True:
-                            t_targets.append(lang)
-                        if o.get("audio") is True:
-                            a_targets.append(lang)
-                        voice = o.get("voice")
-                        if isinstance(voice, str) and voice:
-                            bot.voice_by_lang[lang] = voice
-                    bot.translation_targets = [l for l in dict.fromkeys(t_targets) if l != bot.primary_lang]
-                    bot.audio_targets = [l for l in dict.fromkeys(a_targets) if l != bot.primary_lang]
-            except Exception:
-                pass
-        task = asyncio.create_task(bot.run())
-        self.sessions[key] = task
-        self.bots[key] = bot
-        return {"status": "started"}
+    # Register bot and parse metadata
+    bot = TranslationBot(event_id=ctx.room_name, room_name=room.name)
+    bot.room = room
+    bot.is_connected = True
 
-    async def stop(self, room_name: str):
-        key = room_name
-        task = self.sessions.get(key)
-        bot = self.bots.get(key)
-        if not task:
-            return {"status": "not_found"}
-        try:
-            if bot:
-                await bot.cleanup()
-        except Exception:
-            pass
-        try:
-            task.cancel()
-        except Exception:
-            pass
-        self.sessions.pop(key, None)
-        self.bots.pop(key, None)
-        return {"status": "stopped"}
+    # Register async event handlers
+    room.on("track_subscribed", bot.on_track_subscribed)
+    room.on("track_unsubscribed", bot.on_track_unsubscribed)
+    room.on("participant_connected", bot.on_participant_connected)
+    room.on("participant_disconnected", bot.on_participant_disconnected)
 
-    def list(self):
-        out = []
-        for k, t in self.sessions.items():
-            bot = self.bots.get(k)
-            out.append({
-                "roomName": k,
-                "running": not t.done(),
-                "connected": bool(bot and bot.is_connected),
-                "sourceLanguage": getattr(bot, "primary_lang", None) if bot else None,
-                "translationTargets": list(getattr(bot, "translation_targets", [])) if bot else [],
-                "audioTargets": list(getattr(bot, "audio_targets", [])) if bot else [],
-            })
-        return out
+    # Parse room metadata if present
+    metadata_obj: Dict[str, Any] = {}
+    try:
+        if isinstance(room.metadata, str) and room.metadata:
+            metadata_obj = json.loads(room.metadata)
+    except Exception:
+        metadata_obj = {}
 
-app = FastAPI()
-supervisor = SessionSupervisor()
+    t_targets, a_targets, voices, src_lang = _parse_outputs_from_metadata(metadata_obj)
+    if src_lang:
+        bot.primary_lang = src_lang
+    # De-dup and avoid primary lang echo
+    bot.translation_targets = [l for l in dict.fromkeys(t_targets) if l and l != bot.primary_lang]
+    bot.audio_targets = [l for l in dict.fromkeys(a_targets) if l and l != bot.primary_lang]
+    bot.voice_by_lang.update(voices)
 
-@app.get("/health")
-async def health():
-    sessions = supervisor.list()
-    connected = sum(1 for s in sessions if s.get("connected"))
-    lk_url_configured = bool(os.getenv("LIVEKIT_URL") or os.getenv("NEXT_PUBLIC_LIVEKIT_URL") or os.getenv("LIVEKIT_SERVER_URL"))
-    return {
-        "ok": True,
-        "livekit": {
-            "urlConfigured": lk_url_configured,
-            "apiKeyConfigured": bool(os.getenv("LIVEKIT_API_KEY")),
-            "apiSecretConfigured": bool(os.getenv("LIVEKIT_API_SECRET")),
-        },
-        "sessions": sessions,
-        "connectedSessions": connected,
-    }
+    logger.info(f"Agent configured: src={bot.primary_lang} translations={bot.translation_targets} audio={bot.audio_targets}")
 
-@app.get("/sessions")
-async def sessions():
-    return supervisor.list()
+    # Run processing loop; cleanup on exit
+    await bot.run_with_room()
 
-@app.post("/start")
-async def start_session(body: StartSessionBody):
-    return await supervisor.start(body)
-
-@app.post("/stop")
-async def stop_session(body: StopSessionBody):
-    return await supervisor.stop(body.roomName)
-
-def main():
-    """If launched directly, run as a supervisor HTTP server."""
-    if os.getenv("AGENTS_ENTRYPOINT") == "1":
-        try:
-            # Optional: experimental agents entrypoint to ease migration path
-            from livekit.agents import cli, WorkerOptions  # type: ignore
-
-            async def _noop(_ctx):
-                # Placeholder entrypoint; keep FastAPI supervisor as primary
-                await asyncio.sleep(0.1)
-
-            cli.run_app(WorkerOptions(entrypoint_fnc=_noop))
-            return
-        except Exception as e:
-            logger.error(f"Agents entrypoint failed, falling back to FastAPI: {e}")
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
 
 if __name__ == "__main__":
-    main()
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
