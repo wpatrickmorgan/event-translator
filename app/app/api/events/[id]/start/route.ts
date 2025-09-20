@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
-import { ensureRoom } from '@/lib/livekit'
+import { ensureRoom, closeRoom } from '@/lib/livekit'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: eventId } = await params
@@ -27,7 +27,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .select('mode, voice_id, language:languages(code, name_en, name_native)')
     .eq('event_id', eventId)
 
-  // Ensure room metadata (outputs) before starting worker
+  // Force recreate room to trigger Agents dispatch reliably
+  try {
+    await closeRoom(event.room_name)
+  } catch {}
   try {
     await ensureRoom(event.room_name, {
       eventId,
