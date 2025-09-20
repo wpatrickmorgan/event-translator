@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
 import numpy as np
 
 from livekit import rtc
@@ -29,10 +29,10 @@ class TranslationAgent(Agent):
     def __init__(
         self, 
         primary_lang: str = "en-US",
-        translation_targets: List[str] = None,
-        audio_targets: List[str] = None,
-        **kwargs
-    ):
+        translation_targets: Optional[List[str]] = None,
+        audio_targets: Optional[List[str]] = None,
+        **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         
         # Language configuration
@@ -47,12 +47,12 @@ class TranslationAgent(Agent):
         # Per-language TTS audio tracks
         self.audio_sources: Dict[str, rtc.AudioSource] = {}
         self.published_tracks: Dict[str, rtc.LocalAudioTrack] = {}
-        self.tts_queues: Dict[str, asyncio.Queue] = {}
-        self.tts_tasks: List[asyncio.Task] = []
+        self.tts_queues: Dict[str, asyncio.Queue[Optional[str]]] = {}
+        self.tts_tasks: List[asyncio.Task[Any]] = []
         
-    async def astart(self, ctx: rtc.Room) -> None:
+    async def astart(self, ctx: Any) -> None:
         """Called when agent starts - set up translation services"""
-        await super().astart(ctx)
+        # AgentSession will handle the context setup
         
         # Initialize Google Translate
         self.setup_google_translate()
@@ -98,7 +98,9 @@ class TranslationAgent(Agent):
                 source_language_code=src_lang,
                 target_language_code=tgt_lang,
             )
-            response = self.translate_client.translate_text(request=request)
+            client = self.translate_client
+            assert client is not None  # We check this before calling _translate
+            response = client.translate_text(request=request)
             return response.translations[0].translated_text if response.translations else text
         
         try:
@@ -111,11 +113,12 @@ class TranslationAgent(Agent):
         """Publish JSON to LiveKit data channel (preserved message format)"""
         try:
             data = json.dumps(data_obj).encode('utf-8')
-            await self.ctx.room.local_participant.publish_data(data)
+            if hasattr(self, 'ctx') and self.ctx and self.ctx.room:
+                await self.ctx.room.local_participant.publish_data(data)
         except Exception as e:
             logger.error(f"Error publishing data: {e}")
 
-    async def on_human_speech(self, text: str, *, user_msg) -> None:
+    async def on_human_speech(self, text: str, *, user_msg: Any) -> None:
         """Called by AgentSession when STT produces final text - this is our main entry point!"""
         logger.info(f"Received speech: {text}")
         
@@ -151,16 +154,14 @@ class TranslationAgent(Agent):
                 )
                 
                 # Publish the track
-                await self.ctx.room.local_participant.publish_track(
-                    track, 
-                    rtc.TrackPublishOptions(name=f"translation-audio-{lang}")
-                )
+                if hasattr(self, 'ctx') and self.ctx and self.ctx.room:
+                    await self.ctx.room.local_participant.publish_track(track)
                 
                 self.audio_sources[lang] = audio_source
                 self.published_tracks[lang] = track
                 
                 # Set up TTS processing queue for this language
-                self.tts_queues[lang] = asyncio.Queue()
+                self.tts_queues[lang] = asyncio.Queue[Optional[str]]()
                 self.tts_tasks.append(
                     asyncio.create_task(self._process_tts_queue(lang))
                 )
@@ -188,8 +189,16 @@ class TranslationAgent(Agent):
                 # Use plugin for TTS synthesis
                 tts_configured = google.TTS(language=language)
                 
-                # Synthesize audio
-                audio_data = await tts_configured.synthesize(text)
+                # Synthesize audio - TTS.synthesize returns a stream, not awaitable
+                stream = tts_configured.synthesize(text)
+                audio_data = b""
+                async for chunk in stream:
+                    # chunk is a SynthesizedAudio object, get the raw data
+                    if hasattr(chunk, 'data'):
+                        audio_data += chunk.data
+                    else:
+                        # Skip if data format is unexpected
+                        logger.warning(f"Unexpected TTS chunk format: {type(chunk)}")
                 
                 # Convert to AudioFrames and publish
                 await self._publish_audio_data(audio_source, audio_data)
@@ -266,7 +275,7 @@ class TranslationAgent(Agent):
             
         except Exception as e:
             logger.error(f"Translation handling error for {tgt_lang}: {e}")
-
+            
     async def cleanup(self) -> None:
         """Cleanup resources"""
         try:
@@ -322,7 +331,7 @@ async def entrypoint(ctx: JobContext) -> None:
             metadata_obj = json.loads(ctx.room.metadata)
     except Exception:
         metadata_obj = {}
-    
+
     # Configure languages from metadata
     t_targets, a_targets, src_lang = _parse_outputs_from_metadata(metadata_obj)
     primary_lang = src_lang or "en-US"
@@ -332,10 +341,10 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info(f"Agent configured: src={primary_lang} translations={translation_targets} audio={audio_targets}")
     
     # Create AgentSession with automatic audio management (RoomIO handles everything!)
-    session = AgentSession(
+    session: AgentSession = AgentSession(
         stt=google.STT(
             model="chirp",
-            language_code=primary_lang
+            languages=[primary_lang]
         ),
         # No TTS here - we handle multi-language TTS manually
         # No LLM - we use Google Translate instead
