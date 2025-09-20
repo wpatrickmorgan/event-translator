@@ -150,13 +150,13 @@ class TranslationWorker:
                     logger.info(f"Using hardcoded Spanish voice '{voice_name}' for {lang}")
                     if credentials_info:
                         self.tts_clients[lang] = google.TTS(
-                            language=lang,
+                            language="es-ES",
                             voice_name=voice_name,
                             credentials_info=credentials_info
                         )
                     else:
                         self.tts_clients[lang] = google.TTS(
-                            language=lang,
+                            language="es-ES",
                             voice_name=voice_name
                         )
                 else:
