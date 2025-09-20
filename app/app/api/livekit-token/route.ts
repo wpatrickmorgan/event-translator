@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
     if (!membership || membership.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const token = mintJoinToken({
+    const token = await mintJoinToken({
       roomName: event.room_name,
       identity,
       name: displayName,
@@ -37,8 +37,7 @@ export async function GET(req: NextRequest) {
       canSubscribe: true,
       canPublishData: true,
     })
-    const tokenStr = typeof token === 'string' ? token : String(token)
-    return NextResponse.json({ token: tokenStr, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? process.env.LIVEKIT_SERVER_URL })
+    return NextResponse.json({ token, url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? process.env.LIVEKIT_SERVER_URL })
   } catch {
     return NextResponse.json({ error: 'Failed to issue token' }, { status: 500 })
   }

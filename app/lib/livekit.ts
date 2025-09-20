@@ -4,7 +4,7 @@ const livekitAdminUrl = process.env.LIVEKIT_SERVER_URL!
 const livekitApiKey = process.env.LIVEKIT_API_KEY!
 const livekitApiSecret = process.env.LIVEKIT_API_SECRET!
 
-export function mintJoinToken(params: {
+export async function mintJoinToken(params: {
   roomName: string
   identity: string
   name?: string
@@ -12,7 +12,7 @@ export function mintJoinToken(params: {
   canPublish?: boolean
   canSubscribe?: boolean
   canPublishData?: boolean
-}) {
+}): Promise<string> {
   const at = new AccessToken(livekitApiKey, livekitApiSecret, {
     identity: params.identity,
     name: params.name,
@@ -25,7 +25,7 @@ export function mintJoinToken(params: {
     canSubscribe: params.canSubscribe ?? true,
     canPublishData: params.canPublishData ?? true,
   })
-  return at.toJwt()
+  return await at.toJwt()
 }
 
 export async function ensureRoom(roomName: string, metadata?: unknown) {

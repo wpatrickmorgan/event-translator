@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     const identity = `attendee:${randomUUID()}`
 
     // Public attendees should only be able to subscribe
-    const token = mintJoinToken({
+    const token = await mintJoinToken({
       roomName,
       identity,
       name: body.name?.slice(0, 64),
