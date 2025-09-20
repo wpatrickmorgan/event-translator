@@ -566,7 +566,7 @@ async def entrypoint(ctx: JobContext):
     room = await ctx.connect()
 
     # Register bot and parse metadata
-    bot = TranslationBot(event_id=ctx.room_name, room_name=room.name)
+    bot = TranslationBot(event_id=room.name, room_name=room.name)
     bot.room = room
     bot.is_connected = True
 
