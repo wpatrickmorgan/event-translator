@@ -158,13 +158,10 @@ async def entrypoint(ctx: agents.JobContext):
         
         # Configure OpenAI Realtime model
         realtime_model = openai.realtime.RealtimeModel(
+            model="gpt-4o-realtime-preview",  # Explicit model specification
             voice=primary_output.get('voice', 'alloy'),  # Use configured voice or default
-            temperature=0.3,  # Lower temperature for more consistent translations
-            turn_detection=openai.realtime.ServerVAD(
-                threshold=0.5,
-                prefix_padding_ms=300,
-                silence_duration_ms=600  # Shorter for more responsive translations
-            )
+            temperature=0.6,  # Fixed: minimum valid temperature for consistent translations
+            turn_detection=None  # Disabled for continuous translation (not conversation)
         )
         
         # Create agent session
