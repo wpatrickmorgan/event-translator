@@ -13,17 +13,18 @@
 - NO room created yet
 - NO agent dispatch yet
 
-### 2. Start Event (Room Created with Metadata)
+### 2. Start Event (Room Created)
 - Go to the event details page
 - Click "Start Event" button
 
 **Expected:**
-- Room created with metadata
+- Room created
 - Agent immediately joins
 - Agent logs show:
   ```
   🎪 Translation agent joining event room: [room-name]
-  📋 Event configuration loaded from metadata
+  📡 Fetching event configuration from API...
+  ✅ Event configuration loaded from API
   🎯 Event: [event-id] (Org: [org-id])
   🗣️ Translation: en-US → [languages]
   ✅ Translation agent active for [language]
@@ -87,12 +88,12 @@ lk room info [room-name] | grep metadata
 Previously the room was created when the event was created. Now it's only created when started.
 
 ### ✅ FIXED: No room metadata found
-Room now always has metadata when created since it's only created during the start process.
+Agent now fetches configuration from the app's API instead of relying on room metadata.
 
 ## Verification Checklist
 
 - [ ] Create event - verify NO agent dispatch
-- [ ] Start event - verify agent joins with metadata
+- [ ] Start event - verify agent joins and fetches config from API
 - [ ] Admin audio - verify agent receives and translates
 - [ ] Attendee join - verify translation received
 - [ ] End event - verify agent leaves cleanly

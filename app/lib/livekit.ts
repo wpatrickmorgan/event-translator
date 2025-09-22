@@ -28,34 +28,29 @@ export async function mintJoinToken(params: {
   return await at.toJwt()
 }
 
-export async function ensureRoom(roomName: string, metadata?: unknown) {
+export async function ensureRoom(roomName: string) {
   const svc = new RoomServiceClient(livekitAdminUrl, livekitApiKey, livekitApiSecret)
 
-  // Best effort create (ignore already-exists)
+  // Try to create the room
   try {
-    await svc.createRoom({
-      name: roomName,
-      metadata: metadata ? JSON.stringify(metadata) : undefined,
-    })
-  } catch {
-    // assume already exists or transient error; proceed
-  }
-
-  // Try to update metadata directly using the proper SDK method
-  if (metadata) {
-    try {
-      await svc.updateRoomMetadata(roomName, JSON.stringify(metadata))
+    console.log(`[LiveKit] Creating room ${roomName}`)
+    const room = await svc.createRoom({ name: roomName })
+    console.log(`[LiveKit] Room created successfully`)
+    return room
+  } catch (error) {
+    // Check if room already exists
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorCode = (error as { code?: number })?.code
+    
+    if (errorMessage?.includes('already exists') || errorCode === 6) {
+      console.log(`[LiveKit] Room ${roomName} already exists`)
+      // That's fine, room is ready
       return
-    } catch {}
-
-    // Fallback: only if room is empty, delete and recreate with metadata
-    try {
-      const participants = await svc.listParticipants(roomName).catch(() => [])
-      if (!participants || (Array.isArray(participants) && participants.length === 0)) {
-        try { await svc.deleteRoom(roomName) } catch {}
-        await svc.createRoom({ name: roomName, metadata: JSON.stringify(metadata) })
-      }
-    } catch {}
+    } else {
+      // Some other error occurred
+      console.error(`[LiveKit] Failed to create room:`, errorMessage)
+      throw new Error(`Failed to create room: ${errorMessage}`)
+    }
   }
 }
 

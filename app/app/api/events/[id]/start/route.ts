@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServer } from '@/lib/supabaseServer'
 import { ensureRoom } from '@/lib/livekit'
-import { hasVoiceId } from '@/lib/utils/type-guards'
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id: eventId } = await params
@@ -23,27 +22,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .eq('organization_id', event.org_id)
   if (!membership || membership.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { data: langs } = await supabase
-    .from('event_languages')
-    .select('mode, voice_id, language:languages(code, name_en, name_native)')
-    .eq('event_id', eventId)
-
-  // Create the LiveKit room with metadata when starting the event
-  // This will trigger the translation agent to automatically join
+  // Create the LiveKit room when starting the event
+  // The agent will fetch configuration from our API instead of using room metadata
   try {
-    await ensureRoom(event.room_name, {
-      eventId,
-      orgId: event.org_id,
-      sourceLanguage: 'en-US', // Default source language
-      outputs: (langs || []).map(l => ({
-        lang: l.language.code,
-        captions: l.mode === 'captions_only' || l.mode === 'both',
-        audio: l.mode === 'audio_only' || l.mode === 'both',
-        voice: hasVoiceId(l) ? l.voice_id : undefined,
-      })),
-    })
+    await ensureRoom(event.room_name)
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to create room with metadata'
+    const message = e instanceof Error ? e.message : 'Failed to create room'
     return NextResponse.json({ error: message }, { status: 500 })
   }
 

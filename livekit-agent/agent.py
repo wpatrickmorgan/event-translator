@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Dict, Any, List
 from dotenv import load_dotenv
+import aiohttp
 
 from livekit import agents, rtc
 from livekit.agents import AgentSession, Agent, RoomInputOptions
@@ -61,18 +62,39 @@ async def entrypoint(ctx: agents.JobContext):
     room_name = ctx.room.name
     logger.info(f"🎪 Translation agent joining event room: {room_name}")
     
-    # Parse room metadata to get event configuration
+    # Get the app URL from environment
+    app_url = os.getenv("APP_URL", "https://event-translator.vercel.app")
+    
+    # Fetch event configuration from API
+    logger.info(f"📡 Fetching event configuration from API...")
     event_config = {}
-    if ctx.room.metadata:
-        try:
-            event_config = json.loads(ctx.room.metadata)
-            logger.info(f"📋 Event configuration loaded from metadata")
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse room metadata: {e}")
-            logger.error(f"Raw metadata: {ctx.room.metadata}")
-            return
-    else:
-        logger.error("❌ No room metadata found - cannot determine translation configuration")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"{app_url}/api/events/by-room/{room_name}"
+            logger.info(f"   API URL: {url}")
+            
+            async with session.get(url) as response:
+                if response.status == 200:
+                    event_config = await response.json()
+                    logger.info(f"✅ Event configuration loaded from API")
+                    logger.info(f"   Event ID: {event_config.get('eventId', 'not set')}")
+                    logger.info(f"   Event Name: {event_config.get('eventName', 'not set')}")
+                    logger.info(f"   Org ID: {event_config.get('orgId', 'not set')}")
+                    logger.info(f"   Source Language: {event_config.get('sourceLanguage', 'not set')}")
+                    logger.info(f"   Outputs count: {len(event_config.get('outputs', []))}")
+                elif response.status == 404:
+                    logger.error("❌ Event not found for this room")
+                    return
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ Failed to fetch event config: HTTP {response.status}")
+                    logger.error(f"   Response: {error_text}")
+                    return
+                    
+    except Exception as e:
+        logger.error(f"❌ Error fetching event configuration: {e}")
+        logger.error("Make sure APP_URL environment variable is set correctly")
         return
     
     # Extract configuration

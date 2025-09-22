@@ -5,8 +5,8 @@ A real-time translation agent that joins event rooms and provides live translati
 ## 🎯 How It Works
 
 1. **Admin creates event** with language settings (room NOT created yet)
-2. **Admin starts event** → Creates LiveKit room with metadata
-3. **Agent automatically joins** the room immediately after creation
+2. **Admin starts event** → Creates LiveKit room
+3. **Agent automatically joins** and fetches config from app API
 4. **Agent translates** admin speech to configured target languages
 5. **Attendees receive** translated audio and captions in their selected language
 6. **Admin ends event** → Room closed, agent automatically leaves
@@ -15,17 +15,29 @@ A real-time translation agent that joins event rooms and provides live translati
 
 ```
 Admin → Event Room → Translation Agent → Translated Audio/Text → Attendees
-         (metadata)    (OpenAI Realtime)   (translation-audio-{lang})
+                    ↓                    
+                  API Call              
+                    ↓                    
+              Event Config             
+           (from database)
 ```
 
-## 📋 Event Room Metadata Structure
+## 📋 Event Configuration
 
-The agent expects the following metadata in the event room:
+The agent fetches event configuration from the app's API using the room name:
 
+```
+GET /api/events/by-room/{roomName}
+```
+
+Returns:
 ```json
 {
   "eventId": "unique-event-id",
+  "eventName": "Event Name",
   "orgId": "organization-id",
+  "roomName": "room-name",
+  "status": "live",
   "sourceLanguage": "en-US",
   "outputs": [
     {
@@ -33,11 +45,6 @@ The agent expects the following metadata in the event room:
       "captions": true,
       "audio": true,
       "voice": "alloy"
-    },
-    {
-      "lang": "fr-FR",
-      "captions": true,
-      "audio": false
     }
   ]
 }
@@ -62,9 +69,8 @@ LIVEKIT_API_KEY=your_livekit_api_key
 LIVEKIT_API_SECRET=your_livekit_secret
 LIVEKIT_URL=wss://your-project.livekit.cloud
 
-# Optional (for session logging)
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_key
+# Required - Your app URL for fetching event config
+APP_URL=https://your-app.vercel.app
 ```
 
 ### Local Testing
@@ -156,10 +162,14 @@ Available OpenAI voices:
 
 ### Common Issues
 
-- **"No room metadata found"** - This happens if:
-  - Room was created before event was started (should only create on start)
-  - Event creation is incorrectly creating the room
-  - Metadata wasn't properly set in the start API
+- **"Event not found for this room"** - This happens if:
+  - Room name doesn't match an event in the database
+  - API endpoint is not accessible
+  - APP_URL environment variable is incorrect
+- **"Failed to fetch event config"** - Check:
+  - APP_URL is set correctly in agent environment
+  - API endpoint `/api/events/by-room/{roomName}` is deployed
+  - Network connectivity between agent and app
 - **"No translation outputs configured"** - Event has no languages configured. Add languages to event.
 - **Agent joining immediately after event creation** - Room is being created too early. Ensure room is ONLY created when event is started, not when created.
 - **OpenAI errors** - Check API key and quota limits.
