@@ -5,7 +5,7 @@
  * A simple component for starting and managing translation sessions using LiveKit Agents
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTranslation, type UseTranslationOptions } from '@/hooks/useTranslation'
@@ -47,7 +47,6 @@ export function TranslationRoom({
     isReady,
     connectionStatus,
     error,
-    translationEvents,
     startTranslation,
     stopTranslation,
     clearEvents

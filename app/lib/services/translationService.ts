@@ -7,11 +7,12 @@ import {
   Room, 
   RoomEvent, 
   RemoteParticipant, 
+  LocalParticipant,
   ParticipantKind,
-  TrackPublication,
+  RemoteTrackPublication,
+  RemoteTrack,
   RemoteAudioTrack,
   ConnectionState,
-  DataPacket_Kind,
   RoomOptions 
 } from 'livekit-client'
 import { LivekitService, type TranslationConfig } from './livekitService'
@@ -169,7 +170,7 @@ export class TranslationService {
     console.log('Translation participant connected:', participant.identity, participant.kind)
 
     // Check if this is the translation agent
-    if (participant.kind === ParticipantKind.Agent || 
+    if (participant.kind === ParticipantKind.AGENT || 
         participant.identity.includes('agent')) {
       
       console.log('🤖 Translation agent connected!')
@@ -197,7 +198,7 @@ export class TranslationService {
   private handleParticipantDisconnected = (participant: RemoteParticipant): void => {
     console.log('Translation participant disconnected:', participant.identity)
 
-    if (participant.kind === ParticipantKind.Agent || 
+    if (participant.kind === ParticipantKind.AGENT || 
         participant.identity.includes('agent')) {
       this.updateConnectionStatus({ agentConnected: false })
     }
@@ -211,12 +212,12 @@ export class TranslationService {
    * Handle track subscription
    */
   private handleTrackSubscribed = (
-    track: RemoteAudioTrack, 
-    publication: TrackPublication, 
+    track: RemoteTrack, 
+    publication: RemoteTrackPublication, 
     participant: RemoteParticipant
   ): void => {
-    if (participant.kind === ParticipantKind.Agent && track.kind === 'audio') {
-      this.handleAgentAudio(track)
+    if (participant.kind === ParticipantKind.AGENT && track.kind === 'audio') {
+      this.handleAgentAudio(track as RemoteAudioTrack)
     }
   }
 
@@ -246,8 +247,7 @@ export class TranslationService {
    */
   private handleDataReceived = (
     payload: Uint8Array, 
-    participant?: RemoteParticipant,
-    kind?: DataPacket_Kind
+    participant?: RemoteParticipant
   ): void => {
     try {
       const decoder = new TextDecoder()
@@ -287,9 +287,9 @@ export class TranslationService {
    */
   private handleParticipantMetadataChanged = (
     metadata: string | undefined, 
-    participant: RemoteParticipant
+    participant: LocalParticipant | RemoteParticipant
   ): void => {
-    if (participant.kind === ParticipantKind.Agent && metadata) {
+    if (participant.kind === ParticipantKind.AGENT && metadata) {
       try {
         const data = JSON.parse(metadata)
         if (data.state) {
@@ -385,7 +385,7 @@ export class TranslationService {
       timestamp: Date.now()
     }))
 
-    await this.room.localParticipant.publishData(data, DataPacket_Kind.RELIABLE)
+    await this.room.localParticipant.publishData(data, { reliable: true })
   }
 
   /**

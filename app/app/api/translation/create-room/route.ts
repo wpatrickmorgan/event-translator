@@ -49,34 +49,35 @@ export async function POST(req: NextRequest) {
       canPublishData: true,
     })
 
-    // Log session start in Supabase
-    const { data: session, error: sessionError } = await supabase
-      .table('translation_sessions')
-      .insert([
-        {
-          room_name: roomName,
-          user_id: user.id,
-          organization_id: organizationId,
-          source_language: sourceLanguage,
-          target_languages: targetLanguages,
-          status: 'starting',
-          participant_count: 0,
-          agent_type: 'livekit_openai_realtime'
-        }
-      ])
-      .select()
-      .single()
+    // TODO: Log session start in Supabase (requires translation_sessions table to be created)
+    // const { data: session, error: sessionError } = await supabase
+    //   .from('translation_sessions')
+    //   .insert([
+    //     {
+    //       room_name: roomName,
+    //       user_id: user.id,
+    //       organization_id: organizationId,
+    //       source_language: sourceLanguage,
+    //       target_languages: targetLanguages,
+    //       status: 'starting',
+    //       participant_count: 0,
+    //       agent_type: 'livekit_openai_realtime'
+    //     }
+    //   ])
+    //   .select()
+    //   .single()
 
-    if (sessionError) {
-      console.error('Error logging session to Supabase:', sessionError)
-      // Continue even if logging fails - don't block the user
-    }
+    // if (sessionError) {
+    //   console.error('Error logging session to Supabase:', sessionError)
+    //   // Continue even if logging fails - don't block the user
+    // }
+    // const session = null; // Placeholder until translation_sessions table is created
 
     // Return connection details
     return NextResponse.json({
       token,
       roomName,
-      sessionId: session?.id,
+      sessionId: null, // Placeholder until translation_sessions table is created
       url: process.env.NEXT_PUBLIC_LIVEKIT_URL ?? process.env.LIVEKIT_SERVER_URL,
       config: {
         sourceLanguage,

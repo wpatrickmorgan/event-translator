@@ -33,20 +33,22 @@ export async function POST(req: NextRequest) {
       updated_at: endTime
     }
 
-    let query = supabase.table('translation_sessions')
+    // TODO: End session in Supabase (requires translation_sessions table)
+    // let query = supabase.from('translation_sessions')
     
-    if (sessionId) {
-      query = query.update(updateData).eq('id', sessionId)
-    } else {
-      query = query.update(updateData).eq('room_name', roomName)
-    }
+    // if (sessionId) {
+    //   query = query.update(updateData).eq('id', sessionId)
+    // } else {
+    //   query = query.update(updateData).eq('room_name', roomName)
+    // }
 
-    const { data: session, error: updateError } = await query.select().single()
+    // const { data: session, error: updateError } = await query.select().single()
 
-    if (updateError) {
-      console.error('Error ending session:', updateError)
-      // Continue anyway - non-critical error
-    }
+    // if (updateError) {
+    //   console.error('Error ending session:', updateError)
+    //   // Continue anyway - non-critical error
+    // }
+    const session = { id: sessionId || `room-${roomName}`, room_name: roomName, ...updateData }; // Placeholder
 
     // Log analytics event for session completion
     if (session && finalDuration > 0) {
