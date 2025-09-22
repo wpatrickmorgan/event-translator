@@ -1,0 +1,9 @@
+livekit==1.0.13
+google-cloud-texttospeech==2.29.0
+google-cloud-speech==2.33.0
+google-cloud-translate==3.21.1
+supabase==2.19.0
+numpy==2.3.3
+tenacity==9.1.2
+websockets==14.0
+httpx==0.28.1

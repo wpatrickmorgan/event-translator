@@ -8,8 +8,14 @@ RUN pip install --no-cache-dir -r requirements.txt mypy
 
 # Copy code and mypy config, then run type check
 COPY main.py .
+COPY config.py .
+COPY models.py .
+COPY worker.py .
+COPY audio/ ./audio/
+COPY providers/ ./providers/
+COPY room/ ./room/
 COPY mypy.ini .
-RUN mypy --config-file mypy.ini main.py && touch /mypy_ok
+RUN mypy --config-file mypy.ini . && touch /mypy_ok
 
 
 FROM python:3.11-slim
@@ -30,9 +36,17 @@ COPY --from=typecheck /mypy_ok /mypy_ok
 
 # Copy application code
 COPY main.py .
+COPY config.py .
+COPY models.py .
+COPY worker.py .
+
+# Copy modular architecture directories
+COPY audio/ ./audio/
+COPY providers/ ./providers/
+COPY room/ ./room/
 
 # Create directory for Google credentials
 RUN mkdir -p /app
 
-# Default command: run Agents worker in production mode
-CMD ["python", "main.py", "start"]
+# Default command: run LiveKit translation worker
+CMD ["python", "main.py"]

@@ -1,7 +1,0 @@
-livekit-agents==1.2.9
-livekit-plugins-google==1.2.9
-google-cloud-translate==3.21.1
-numpy==2.3.3
-tenacity==9.1.2
-websockets==14.0
-httpx==0.28.1

@@ -22,18 +22,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .eq('organization_id', event.org_id)
   if (!membership || membership.length === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // Close the room (agent will automatically leave)
   await closeRoom(event.room_name)
-  const workerUrl = process.env.WORKER_PUBLIC_URL
-  if (workerUrl) {
-    try {
-      await fetch(`${workerUrl.replace(/\/$/, '')}/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ roomName: event.room_name }),
-      })
-    } catch {}
-  }
+  
+  // Note: LiveKit Agent will automatically stop when room closes
+  // No need to manually stop worker like with Railway
 
   const { error: updErr } = await supabase
     .from('events')

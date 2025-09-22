@@ -1,6 +1,7 @@
 // LiveKit message types for the event translator
-// Based on the worker's message schema documented in worker/README.md
+// Updated to support both legacy worker messages and new LiveKit Agents
 
+// Legacy worker messages (maintain backward compatibility for events)
 export interface CaptionMessage {
   type: 'caption'
   lang: string
@@ -34,11 +35,48 @@ export interface TranslationAudioMessage {
   ts: number
 }
 
+// New LiveKit Agents messages
+export interface AgentTranslationTextMessage {
+  type: 'translation_text'
+  text: string
+  language: string
+  sourceLanguage?: string
+  timestamp: number
+  confidence?: number
+}
+
+export interface AgentTranscriptionMessage {
+  type: 'transcription'
+  text: string
+  language: string
+  timestamp: number
+  confidence?: number
+  isFinal?: boolean
+}
+
+export interface AgentConfigUpdateMessage {
+  type: 'config_update'
+  sourceLanguage?: string
+  targetLanguages?: string[]
+  timestamp: number
+}
+
+export interface AgentStateMessage {
+  type: 'agent_state'
+  state: 'initializing' | 'listening' | 'thinking' | 'speaking'
+  timestamp: number
+}
+
+// Union of all message types
 export type LiveKitMessage = 
   | CaptionMessage 
   | OriginalLanguageTextMessage 
   | TranslationTextMessage 
   | TranslationAudioMessage
+  | AgentTranslationTextMessage
+  | AgentTranscriptionMessage
+  | AgentConfigUpdateMessage
+  | AgentStateMessage
 
 // Type guard functions to safely check message types
 export function isCaptionMessage(msg: unknown): msg is CaptionMessage {
@@ -79,9 +117,44 @@ export function isTranslationAudioMessage(msg: unknown): msg is TranslationAudio
     'ts' in msg && typeof msg.ts === 'number'
 }
 
+// New type guards for agent messages
+export function isAgentTranslationTextMessage(msg: unknown): msg is AgentTranslationTextMessage {
+  return typeof msg === 'object' && msg !== null &&
+    'type' in msg && msg.type === 'translation_text' &&
+    'text' in msg && typeof msg.text === 'string' &&
+    'language' in msg && typeof msg.language === 'string' &&
+    'timestamp' in msg && typeof msg.timestamp === 'number'
+}
+
+export function isAgentTranscriptionMessage(msg: unknown): msg is AgentTranscriptionMessage {
+  return typeof msg === 'object' && msg !== null &&
+    'type' in msg && msg.type === 'transcription' &&
+    'text' in msg && typeof msg.text === 'string' &&
+    'language' in msg && typeof msg.language === 'string' &&
+    'timestamp' in msg && typeof msg.timestamp === 'number'
+}
+
+export function isAgentConfigUpdateMessage(msg: unknown): msg is AgentConfigUpdateMessage {
+  return typeof msg === 'object' && msg !== null &&
+    'type' in msg && msg.type === 'config_update' &&
+    'timestamp' in msg && typeof msg.timestamp === 'number'
+}
+
+export function isAgentStateMessage(msg: unknown): msg is AgentStateMessage {
+  return typeof msg === 'object' && msg !== null &&
+    'type' in msg && msg.type === 'agent_state' &&
+    'state' in msg && typeof msg.state === 'string' &&
+    ['initializing', 'listening', 'thinking', 'speaking'].includes(msg.state as string) &&
+    'timestamp' in msg && typeof msg.timestamp === 'number'
+}
+
 export function isLiveKitMessage(msg: unknown): msg is LiveKitMessage {
   return isCaptionMessage(msg) || 
     isOriginalLanguageTextMessage(msg) || 
     isTranslationTextMessage(msg) || 
-    isTranslationAudioMessage(msg)
+    isTranslationAudioMessage(msg) ||
+    isAgentTranslationTextMessage(msg) ||
+    isAgentTranscriptionMessage(msg) ||
+    isAgentConfigUpdateMessage(msg) ||
+    isAgentStateMessage(msg)
 }
