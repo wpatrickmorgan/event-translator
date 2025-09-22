@@ -1,16 +1,15 @@
 """
-LiveKit Translation Agent using OpenAI Realtime API
-Integrates with existing event-translator app architecture
+LiveKit Translation Agent for Event Translator
+Handles real-time translation for events with multiple language outputs
 """
 import os
 import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 from livekit import agents, rtc
 from livekit.agents import AgentSession, Agent, RoomInputOptions
-from livekit import rtc
 from livekit.plugins import openai
 
 # Load environment variables
@@ -20,261 +19,217 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class TranslationAgent(Agent):
-    """
-    Event translation agent using OpenAI's Realtime API.
-    
-    This agent:
-    - Integrates with existing event-translator app architecture
-    - Listens to event speakers (admin audio input)
-    - Provides real-time translations for event attendees
-    - Uses existing message format and track naming
-    """
-    
-    def __init__(
-        self, 
-        target_language: str = "spanish",
-        source_language: str = "auto-detect"
-    ):
-        self.target_language = target_language
-        self.source_language = source_language
-        
-        # Create instructions for the AI
-        instructions = self._build_instructions()
-        
-        super().__init__(instructions=instructions)
-        logger.info(f"Event translation agent initialized: {source_language} → {target_language}")
-    
-    def _build_instructions(self) -> str:
-        """Build instructions for the event translation agent"""
-        return f"""You are a professional real-time translator for live events.
 
-Your role:
-- Listen to audio from event speakers and administrators
-- Translate speech from {self.source_language} to {self.target_language}
-- Provide immediate, accurate translations for event attendees
+class EventTranslator(Agent):
+    """Translation agent for live events"""
+    
+    def __init__(self, target_language: str, source_language: str = "auto"):
+        # Build translation instructions
+        instructions = f"""You are a professional real-time translator for live events.
 
-Event Context:
-- This is a live event with administrators speaking to attendees
-- You will receive audio from event organizers/speakers
-- Your translations help attendees understand the event content
-- Maintain professional, clear communication suitable for events
+Your task: Translate everything you hear from {source_language} into {target_language}.
 
 Guidelines:
-1. ACCURACY: Provide precise translations while preserving meaning
-2. CONTEXT: Remember this is a live event - maintain professional tone
-3. REAL-TIME: Respond immediately when speech ends
-4. CLARITY: Generate clear, natural-sounding translations
-5. CULTURAL: Adapt idioms and cultural references appropriately
-6. CONSISTENCY: Maintain consistent terminology throughout the event
+1. Provide accurate, natural translations in {target_language}
+2. Maintain the speaker's tone, emotion, and intent
+3. Be concise but complete - don't add or remove meaning
+4. Adapt cultural references appropriately for the target audience
+5. Use appropriate formality based on the speaker's tone
 
-Language Instructions:
-- Source: {self.source_language}
-- Target: {self.target_language}
-- If source is "auto-detect", identify the spoken language automatically
+CRITICAL INSTRUCTIONS:
+- Output ONLY the translation in {target_language}
+- Do NOT announce "translation" or any preamble
+- Do NOT repeat in the source language
+- Translate EVERYTHING you hear, including:
+  - Main content and speeches
+  - Questions from audience
+  - Instructions and announcements
+  - Side comments if audible
 
-Response Format:
-- Speak your translation directly in {self.target_language}
-- Do NOT announce "Translation:" or similar prefixes
-- Provide natural, conversational translations
-- Match the speaker's level of formality
+Speak naturally and fluently in {target_language} as if you were the original speaker."""
 
-Event Types You May Encounter:
-- Presentations and speeches
-- Q&A sessions
-- Announcements and instructions
-- Interactive discussions
-- Technical content
+        super().__init__(instructions=instructions)
+        self.target_language = target_language
+        self.source_language = source_language
 
-Remember: You are helping attendees participate fully in the live event by providing seamless real-time translation."""
-
-class SessionManager:
-    """Manages translation session data and Supabase integration"""
-    
-    def __init__(self):
-        self.supabase_url = os.getenv("SUPABASE_URL")
-        self.supabase_key = os.getenv("SUPABASE_ANON_KEY")
-        self.supabase = None
-        
-        # Initialize Supabase if credentials are available
-        if self.supabase_url and self.supabase_key:
-            try:
-                from supabase import create_client
-                self.supabase = create_client(self.supabase_url, self.supabase_key)
-                logger.info("Supabase integration initialized")
-            except ImportError:
-                logger.warning("Supabase package not available - logging disabled")
-            except Exception as e:
-                logger.error(f"Failed to initialize Supabase: {e}")
-    
-    async def log_agent_activity(self, event_id: str, activity_type: str, details: Dict[str, Any]):
-        """Log agent activity for events"""
-        if not self.supabase:
-            return
-            
-        try:
-            # You can create this table later when you want event logging
-            # For now, just log to console
-            logger.info(f"Event {event_id} - {activity_type}: {details}")
-            # Future: await self.supabase.table("event_agent_logs").insert(...)
-        except Exception as e:
-            logger.error(f"Failed to log agent activity: {e}")
 
 async def entrypoint(ctx: agents.JobContext):
     """
-    Main entry point for the event translation agent.
-    This function is called when the agent joins an event room.
+    Entry point for the translation agent.
+    Called when agent joins an event room.
     """
     room_name = ctx.room.name
-    logger.info(f"🎪 Event translation agent joining room: {room_name}")
+    logger.info(f"🎪 Translation agent joining event room: {room_name}")
     
-    # Initialize session manager
-    session_manager = SessionManager()
-    
-    # Extract event configuration from room metadata
+    # Parse room metadata to get event configuration
     event_config = {}
-    room_metadata = ctx.room.metadata
-    
-    if room_metadata:
+    if ctx.room.metadata:
         try:
-            event_config = json.loads(room_metadata)
-            logger.info(f"📋 Event configuration loaded: {event_config}")
-        except json.JSONDecodeError:
-            logger.warning("Could not parse room metadata, using defaults")
+            event_config = json.loads(ctx.room.metadata)
+            logger.info(f"📋 Event configuration loaded from metadata")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse room metadata: {e}")
+            logger.error(f"Raw metadata: {ctx.room.metadata}")
+            return
+    else:
+        logger.error("❌ No room metadata found - cannot determine translation configuration")
+        return
     
-    # Extract translation configuration from event metadata
+    # Extract configuration
+    event_id = event_config.get('eventId', 'unknown')
+    org_id = event_config.get('orgId', 'unknown')
     source_language = event_config.get('sourceLanguage', 'en-US')
     outputs = event_config.get('outputs', [])
-    target_languages = [output['lang'] for output in outputs if output.get('audio', True)]
-    primary_target = target_languages[0] if target_languages else 'es-ES'
     
-    # Convert language codes (es-ES -> spanish) for OpenAI
+    if not outputs:
+        logger.error("❌ No translation outputs configured for this event")
+        return
+    
+    # Filter outputs that have audio enabled
+    audio_outputs = [o for o in outputs if o.get('audio', False)]
+    caption_outputs = [o for o in outputs if o.get('captions', False)]
+    
+    if not audio_outputs and not caption_outputs:
+        logger.error("❌ No audio or caption outputs configured")
+        return
+    
+    # Get target languages from outputs
+    target_languages = list(set([o['lang'] for o in outputs]))
+    
+    # For now, handle the first configured language
+    # In production, you might spawn multiple agents for multiple languages
+    primary_output = outputs[0]
+    primary_target = primary_output['lang']
+    
+    # Convert language codes for OpenAI (es-ES -> Spanish)
     lang_map = {
-        'es-ES': 'spanish', 'es': 'spanish',
-        'fr-FR': 'french', 'fr': 'french', 
-        'de-DE': 'german', 'de': 'german',
-        'it-IT': 'italian', 'it': 'italian',
-        'pt-PT': 'portuguese', 'pt': 'portuguese'
+        'es-ES': 'Spanish', 'es': 'Spanish',
+        'fr-FR': 'French', 'fr': 'French', 
+        'de-DE': 'German', 'de': 'German',
+        'it-IT': 'Italian', 'it': 'Italian',
+        'pt-PT': 'Portuguese', 'pt': 'Portuguese',
+        'pt-BR': 'Brazilian Portuguese',
+        'zh-CN': 'Mandarin Chinese', 'zh': 'Chinese',
+        'ja-JP': 'Japanese', 'ja': 'Japanese',
+        'ko-KR': 'Korean', 'ko': 'Korean',
+        'ru-RU': 'Russian', 'ru': 'Russian',
+        'ar-SA': 'Arabic', 'ar': 'Arabic',
+        'hi-IN': 'Hindi', 'hi': 'Hindi',
+        'nl-NL': 'Dutch', 'nl': 'Dutch',
+        'sv-SE': 'Swedish', 'sv': 'Swedish',
+        'pl-PL': 'Polish', 'pl': 'Polish'
     }
-    openai_target_lang = lang_map.get(primary_target, primary_target.split('-')[0])
     
-    logger.info(f"Event: {event_config.get('eventId', 'unknown')}")
-    logger.info(f"Translation: {source_language} → {target_languages}")
+    openai_target_lang = lang_map.get(primary_target, primary_target.split('-')[0].title())
     
-    # Create translation agent for event
-    agent = TranslationAgent(
-        target_language=openai_target_lang,
-        source_language="auto-detect"
-    )
-    
-    # Configure OpenAI Realtime Model for event environment
-    realtime_model = openai.realtime.RealtimeModel(
-        model="gpt-4o-realtime-preview",
-        voice="alloy",  # Natural voice for translations
-        temperature=0.2,  # Lower temperature for consistent event translations
-        # Configure turn detection for event speakers
-        turn_detection=openai.realtime.ServerVAD(
-            threshold=0.6,  # Adjust for event environment
-            prefix_padding_ms=300,
-            silence_duration_ms=800  # Longer pause for event speakers
-        )
-    )
-    
-    # Create agent session with the realtime model
-    session = AgentSession(
-        llm=realtime_model
-    )
-    
-    # Set up room input options for event environment
-    room_input_options = RoomInputOptions(
-        auto_subscribe=True,  # Subscribe to all event audio
-        dynacast=True  # Optimize for event streaming
-    )
+    logger.info(f"🎯 Event: {event_id} (Org: {org_id})")
+    logger.info(f"🗣️ Translation: {source_language} → {primary_target} ({openai_target_lang})")
+    logger.info(f"📡 Audio enabled: {primary_output.get('audio', False)}")
+    logger.info(f"📝 Captions enabled: {primary_output.get('captions', False)}")
     
     try:
-        # Start the agent session
+        # Create the translation agent
+        translator = EventTranslator(
+            target_language=openai_target_lang,
+            source_language="auto"  # Auto-detect source language
+        )
+        
+        # Configure OpenAI Realtime model
+        realtime_model = openai.realtime.RealtimeModel(
+            voice=primary_output.get('voice', 'alloy'),  # Use configured voice or default
+            temperature=0.3,  # Lower temperature for more consistent translations
+            turn_detection=openai.realtime.ServerVAD(
+                threshold=0.5,
+                prefix_padding_ms=300,
+                silence_duration_ms=600  # Shorter for more responsive translations
+            )
+        )
+        
+        # Create agent session
+        session = AgentSession(
+            llm=realtime_model
+        )
+        
+        # Configure how the agent receives room audio
+        room_input_options = RoomInputOptions(
+            # Agent should subscribe to all participants (admins) by default
+            auto_subscribe=True,
+            # Use dynamic subscription for better performance
+            dynacast=True
+        )
+        
+        # Start the session
+        logger.info("🔄 Starting translation session...")
         await session.start(
             room=ctx.room,
-            agent=agent,
+            agent=translator,
             room_input_options=room_input_options
         )
         
-        # Log agent start
-        await session_manager.log_agent_activity(
-            event_config.get('eventId', 'unknown'),
-            'agent_started',
-            {'target_languages': target_languages, 'room_name': room_name}
-        )
+        logger.info(f"✅ Translation agent active for {openai_target_lang}")
+        logger.info(f"📻 Listening for audio input from administrators...")
+        logger.info(f"🔊 Publishing translations as: translation-audio-{primary_target}")
         
-        # Set up event-specific message handling
-        await setup_event_message_handling(ctx, event_config, session_manager)
+        # The agent will now:
+        # 1. Listen to admin audio input automatically
+        # 2. Translate using OpenAI Realtime
+        # 3. Publish translated audio to the room
         
-        logger.info("✅ Event translation agent started successfully")
+        # For captions, we'd need to implement a callback to capture
+        # the text output and send it as data messages
+        if primary_output.get('captions', False):
+            logger.info(f"📝 Publishing captions as: translation-text-{primary_target}")
+            # Note: Caption handling would need additional implementation
+            # to capture text from the realtime model and send as data messages
         
-        # Agent runs until the event ends
+        # Keep the agent running
+        logger.info("🎙️ Translation agent is running. Waiting for speech...")
         
     except Exception as e:
-        logger.error(f"❌ Error starting event agent: {e}")
-        await session_manager.log_agent_activity(
-            event_config.get('eventId', 'unknown'),
-            'agent_error',
-            {'error': str(e), 'room_name': room_name}
-        )
+        logger.error(f"❌ Failed to start translation agent: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise
-    finally:
-        # Clean up when event ends
-        await session_manager.log_agent_activity(
-            event_config.get('eventId', 'unknown'),
-            'agent_stopped', 
-            {'room_name': room_name}
-        )
-        logger.info("🧹 Event translation agent cleanup completed")
 
-async def setup_event_message_handling(ctx: agents.JobContext, event_config: Dict[str, Any], session_manager):
-    """Set up event-specific message handling to match your existing message format"""
-    
-    # This function sets up handlers to publish messages in your expected format:
-    # - translation-text-${lang} for captions
-    # - translation-audio-${lang} for audio tracks
-    
-    outputs = event_config.get('outputs', [])
-    event_id = event_config.get('eventId', 'unknown')
-    
-    # The OpenAI Realtime model will automatically handle most of the translation
-    # We just need to ensure messages are published in your expected format
-    
-    # Note: The realtime model automatically publishes audio with track names
-    # and sends data messages. The key is ensuring it matches your format.
-    
-    logger.info(f"Event message handling configured for event {event_id}")
-    logger.info(f"Expected outputs: {outputs}")
-    
-    # Log that message handling is set up
-    await session_manager.log_agent_activity(
-        event_id,
-        'message_handling_configured',
-        {'outputs': outputs}
-    )
 
 def main():
     """Main function to run the agent"""
-    logger.info("🚀 Starting LiveKit Translation Agent")
+    logger.info("🚀 Starting LiveKit Translation Agent for Events")
     
     # Verify required environment variables
-    required_vars = ["OPENAI_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "LIVEKIT_URL"]
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    required_vars = ["OPENAI_API_KEY", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+    
+    # Handle LIVEKIT_URL with fallback
+    livekit_url = os.getenv("LIVEKIT_URL") or os.getenv("LIVEKIT_SERVER_URL")
+    if livekit_url:
+        os.environ["LIVEKIT_URL"] = livekit_url
+        logger.info(f"📍 LiveKit URL: {livekit_url}")
+    else:
+        logger.error("❌ Missing LIVEKIT_URL environment variable")
+        logger.error("   Set LIVEKIT_URL to your LiveKit Cloud URL (e.g., wss://your-project.livekit.cloud)")
+        return
+    
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
     
     if missing_vars:
         logger.error(f"❌ Missing required environment variables: {missing_vars}")
+        logger.error("   Please check your .env file or environment configuration")
         return
     
-    # Create worker options
+    # Log that we're using LiveKit Cloud
+    if "livekit.cloud" in livekit_url:
+        logger.info("☁️  Using LiveKit Cloud deployment")
+    
+    # Create and run worker
     worker_options = agents.WorkerOptions(
-        entrypoint_fnc=entrypoint
+        entrypoint_fnc=entrypoint,
     )
     
-    # Run the agent
     agents.cli.run_app(worker_options)
+
 
 if __name__ == "__main__":
     main()

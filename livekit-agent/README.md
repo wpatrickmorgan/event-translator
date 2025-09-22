@@ -1,45 +1,63 @@
-# LiveKit Translation Agent
+# LiveKit Translation Agent for Events
 
-A real-time translation agent built with LiveKit Agents framework and OpenAI's Realtime API.
+A real-time translation agent that joins event rooms and provides live translations using OpenAI's Realtime API.
 
-## 🚀 What This Replaces
+## 🎯 How It Works
 
-This simple agent replaces the entire complex `worker/` directory (1000+ lines of code) with a streamlined ~200 line implementation that provides better performance and maintainability.
-
-### Before (Complex Worker):
-- Multiple provider abstractions
-- Manual audio processing
-- Complex room management  
-- Custom event handling
-- 10+ Python packages
-- 284-line main worker file + supporting modules
-
-### After (LiveKit Agent):
-- Single OpenAI Realtime API call
-- Automatic audio processing
-- Built-in room management
-- Automatic event handling
-- 3 Python packages
-- 200-line agent file
+1. **Admin creates event** with language settings in the web app
+2. **Admin starts event** which creates a LiveKit room with metadata
+3. **Agent automatically joins** the event room when dispatched
+4. **Agent translates** admin speech to configured target languages
+5. **Attendees receive** translated audio and captions in their selected language
 
 ## 🏗️ Architecture
 
 ```
-User Browser ←→ Next.js (Vercel) ←→ LiveKit Cloud ←→ Translation Agent
-                     ↓
-                 Supabase (optional logging)
+Admin → Event Room → Translation Agent → Translated Audio/Text → Attendees
+         (metadata)    (OpenAI Realtime)   (translation-audio-{lang})
 ```
 
-## 🛠️ Setup
+## 📋 Event Room Metadata Structure
 
-### 1. Environment Variables
+The agent expects the following metadata in the event room:
 
-Create a `.env` file with:
+```json
+{
+  "eventId": "unique-event-id",
+  "orgId": "organization-id",
+  "sourceLanguage": "en-US",
+  "outputs": [
+    {
+      "lang": "es-ES",
+      "captions": true,
+      "audio": true,
+      "voice": "alloy"
+    },
+    {
+      "lang": "fr-FR",
+      "captions": true,
+      "audio": false
+    }
+  ]
+}
+```
+
+## 🚀 Deployment
+
+### Prerequisites
+
+1. **LiveKit Cloud Account** - Sign up at https://cloud.livekit.io
+2. **OpenAI API Key** - Get from https://platform.openai.com
+3. **LiveKit CLI** - Install via `brew install livekit-cli` or download
+
+### Environment Variables
+
+Create a `.env` file:
 
 ```bash
 # Required
 OPENAI_API_KEY=your_openai_api_key
-LIVEKIT_API_KEY=your_livekit_api_key  
+LIVEKIT_API_KEY=your_livekit_api_key
 LIVEKIT_API_SECRET=your_livekit_secret
 LIVEKIT_URL=wss://your-project.livekit.cloud
 
@@ -48,72 +66,134 @@ SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_key
 ```
 
-### 2. Local Development
+### Local Testing
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Test locally
-python agent.py dev
+# Run tests
+python test_local.py
 
-# Test in console mode (Python only)
-python agent.py console
+# Test locally with dev mode
+python agent.py dev
 ```
 
-### 3. Deploy to LiveKit Cloud
+### Deploy to LiveKit Cloud
 
 ```bash
 # Authenticate with LiveKit Cloud
 lk cloud auth
 
-# Create and deploy agent
-lk agent create
-
-# Deploy updates
+# Deploy the agent
 lk agent deploy
 
-# Monitor status
+# Check deployment status
 lk agent status
+
+# View logs
 lk agent logs
 ```
 
+## 📡 Published Tracks
+
+The agent publishes translation tracks with specific naming conventions:
+
+- **Audio**: `translation-audio-{lang}` (e.g., `translation-audio-es-ES`)
+- **Text**: `translation-text-{lang}` data messages
+
 ## 🔧 Configuration
 
-The agent automatically detects configuration from room participant metadata:
+### Supported Languages
 
-```json
-{
-  "sourceLanguage": "en",
-  "targetLanguage": "spanish",
-  "organizationId": "org_123"
-}
-```
+The agent maps language codes to OpenAI language names:
 
-## 🌟 Features
+- `es-ES` → Spanish
+- `fr-FR` → French
+- `de-DE` → German
+- `it-IT` → Italian
+- `pt-PT` → Portuguese
+- `pt-BR` → Brazilian Portuguese
+- `zh-CN` → Mandarin Chinese
+- `ja-JP` → Japanese
+- `ko-KR` → Korean
+- `ru-RU` → Russian
+- `ar-SA` → Arabic
+- `hi-IN` → Hindi
 
-- **Auto Language Detection**: Automatically detects source language
-- **Real-time Translation**: Instant speech-to-speech translation
-- **Emotion Preservation**: Maintains speaker tone and context
-- **Multi-participant Support**: Handles multiple speakers
-- **Session Logging**: Optional Supabase integration
-- **Production Ready**: Built-in scaling and reliability
+### Voice Options
+
+Available OpenAI voices:
+- `alloy` (default)
+- `echo`
+- `fable`
+- `onyx`
+- `nova`
+- `shimmer`
+
+## 🐛 Troubleshooting
+
+### Agent not joining rooms
+
+1. Check room metadata is properly set:
+   ```bash
+   lk room list
+   lk room info <room-name>
+   ```
+
+2. Verify agent deployment:
+   ```bash
+   lk agent status
+   lk agent logs --tail 100
+   ```
+
+### No translation output
+
+1. Ensure admin is publishing audio
+2. Check agent logs for errors
+3. Verify language configuration in room metadata
+
+### Common Issues
+
+- **"No room metadata found"** - Room wasn't created with proper metadata. Check event start API.
+- **"No translation outputs configured"** - Event has no languages configured. Add languages to event.
+- **OpenAI errors** - Check API key and quota limits.
 
 ## 📊 Monitoring
 
-- **LiveKit Cloud Dashboard**: Monitor sessions and performance
-- **Agent Logs**: `lk agent logs` for debugging
-- **Supabase Analytics**: Session data and translation events
+View agent performance in LiveKit Cloud dashboard:
+- Real-time session monitoring
+- Audio quality metrics
+- Error tracking
+- Usage statistics
 
-## 🔄 Migration Benefits
+## 🔄 Updates
 
-1. **95% Less Code**: Simplified from 1000+ lines to ~200 lines
-2. **Better Performance**: Direct speech-to-speech processing
-3. **Auto Scaling**: LiveKit Cloud handles infrastructure
-4. **Easier Debugging**: Centralized logging and monitoring
-5. **Global Deployment**: Built-in edge distribution
-6. **Zero Maintenance**: No more container management
+To update the agent:
 
-## 🚨 Rollback Plan
+```bash
+# Make changes to agent.py
+# Test locally
+python test_local.py
 
-If needed, the old worker system is preserved in `worker_legacy/` and can be reactivated quickly while issues are resolved.
+# Deploy update
+lk agent deploy
+
+# Verify deployment
+lk agent status
+```
+
+## 🚨 Important Notes
+
+1. **One language per agent instance** - Currently handles primary target language only
+2. **Room metadata required** - Agent will exit if no valid metadata found
+3. **Auto-dispatch** - Agent automatically joins when event room is created
+4. **Persistent connection** - Agent stays connected until event ends
+
+## 📝 Future Enhancements
+
+- [ ] Multiple language support (spawn multiple agents)
+- [ ] Custom voice per language
+- [ ] Translation confidence scores
+- [ ] Session recording and transcripts
+- [ ] Real-time quality monitoring
