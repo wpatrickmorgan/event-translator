@@ -140,15 +140,8 @@ export class EventService {
         }
       }
 
-      // Build LiveKit room metadata now that event and languages exist (server route to avoid client SDK usage)
-      try {
-        await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/events/${eventData.id}/metadata`, {
-          method: 'POST',
-          cache: 'no-store',
-        })
-      } catch (e) {
-        console.warn('Failed to call metadata route (non-fatal):', e)
-      }
+      // Don't create the LiveKit room here - it should only be created when the event is started
+      // This prevents the agent from joining an empty room with no metadata
 
       return { data: eventData, error: null }
     } catch (error) {

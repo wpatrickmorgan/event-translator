@@ -28,7 +28,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .select('mode, voice_id, language:languages(code, name_en, name_native)')
     .eq('event_id', eventId)
 
-  // Ensure room metadata (no forced delete to avoid dispatch race)
+  // Create the LiveKit room with metadata when starting the event
+  // This will trigger the translation agent to automatically join
   try {
     await ensureRoom(event.room_name, {
       eventId,
@@ -42,7 +43,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       })),
     })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to ensure room metadata'
+    const message = e instanceof Error ? e.message : 'Failed to create room with metadata'
     return NextResponse.json({ error: message }, { status: 500 })
   }
 

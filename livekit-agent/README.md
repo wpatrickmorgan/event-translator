@@ -4,11 +4,12 @@ A real-time translation agent that joins event rooms and provides live translati
 
 ## 🎯 How It Works
 
-1. **Admin creates event** with language settings in the web app
-2. **Admin starts event** which creates a LiveKit room with metadata
-3. **Agent automatically joins** the event room when dispatched
+1. **Admin creates event** with language settings (room NOT created yet)
+2. **Admin starts event** → Creates LiveKit room with metadata
+3. **Agent automatically joins** the room immediately after creation
 4. **Agent translates** admin speech to configured target languages
 5. **Attendees receive** translated audio and captions in their selected language
+6. **Admin ends event** → Room closed, agent automatically leaves
 
 ## 🏗️ Architecture
 
@@ -155,8 +156,12 @@ Available OpenAI voices:
 
 ### Common Issues
 
-- **"No room metadata found"** - Room wasn't created with proper metadata. Check event start API.
+- **"No room metadata found"** - This happens if:
+  - Room was created before event was started (should only create on start)
+  - Event creation is incorrectly creating the room
+  - Metadata wasn't properly set in the start API
 - **"No translation outputs configured"** - Event has no languages configured. Add languages to event.
+- **Agent joining immediately after event creation** - Room is being created too early. Ensure room is ONLY created when event is started, not when created.
 - **OpenAI errors** - Check API key and quota limits.
 
 ## 📊 Monitoring
