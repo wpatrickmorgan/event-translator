@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 import aiohttp
 
 from livekit import agents, rtc
-from livekit.agents import AgentSession, Agent, RoomInputOptions
+from livekit.agents import AgentSession, Agent, RoomInputOptions, RoomOutputOptions
 from livekit.plugins import openai
 
 # Load environment variables
@@ -170,11 +170,12 @@ async def entrypoint(ctx: agents.JobContext):
         )
         
         # Configure how the agent receives room audio
-        room_input_options = RoomInputOptions(
-            # Agent should subscribe to all participants (admins) by default
-            auto_subscribe=True,
-            # Use dynamic subscription for better performance
-            dynacast=True
+        room_input_options = RoomInputOptions()
+        
+        # Configure room output options for transcription capture
+        room_output_options = RoomOutputOptions(
+            transcription_enabled=True,
+            sync_transcription=False,
         )
         
         # Start the session
@@ -182,7 +183,8 @@ async def entrypoint(ctx: agents.JobContext):
         await session.start(
             room=ctx.room,
             agent=translator,
-            room_input_options=room_input_options
+            room_input_options=room_input_options,
+            room_output_options=room_output_options
         )
         
         logger.info(f"✅ Translation agent active for {openai_target_lang}")
@@ -193,13 +195,11 @@ async def entrypoint(ctx: agents.JobContext):
         # 1. Listen to admin audio input automatically
         # 2. Translate using OpenAI Realtime
         # 3. Publish translated audio to the room
+        # 4. Forward transcriptions via LiveKit's built-in text streams
         
-        # For captions, we'd need to implement a callback to capture
-        # the text output and send it as data messages
         if primary_output.get('captions', False):
-            logger.info(f"📝 Publishing captions as: translation-text-{primary_target}")
-            # Note: Caption handling would need additional implementation
-            # to capture text from the realtime model and send as data messages
+            logger.info(f"📝 Publishing captions via 'lk.transcription' text stream")
+            logger.info(f"📡 Frontend should listen to 'lk.transcription' topic for captions")
         
         # Keep the agent running
         logger.info("🎙️ Translation agent is running. Waiting for speech...")
