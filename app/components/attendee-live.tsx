@@ -1,9 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Room, RoomEvent, RemoteTrackPublication, Track } from 'livekit-client'
+import { Room, RoomEvent, RemoteTrackPublication, Track, RemoteParticipant } from 'livekit-client'
 import { useAttendeeStore } from '@/lib/stores/attendeeStore'
-import { isTranslationTextMessage } from '@/types/livekit-messages'
 
 interface AttendeeLiveProps {
   roomName: string
@@ -48,30 +47,36 @@ export function AttendeeLive(props: AttendeeLiveProps) {
 
     r.on(RoomEvent.Disconnected, () => {})
 
-    // Data messages for captions
-    r.on(RoomEvent.DataReceived, (payload) => {
+    // Register handler for agent transcriptions using LiveKit's text stream API
+    const handleTranscriptions = async (reader: any, participantInfo: any) => {
       try {
-        const str = new TextDecoder().decode(payload)
-        const msg = JSON.parse(str)
-        if (!enableCaptions) return
-        if (!selectedLangCode) return
+        if (!enableCaptions || !selectedLangCode) return
         
-        // Use type guard for safe type checking
-        if (isTranslationTextMessage(msg)) {
-          const expectedType = `translation-text-${selectedLangCode}`
-          if (msg.type === expectedType) {
-            // append, keep last 50
-            setCaptions(prev => {
-              const next = [...prev, msg.text]
-              return next.slice(-50)
-            })
-          }
+        // Check if this transcription is from our target language translator agent
+        const expectedAgentId = `translator-${selectedLangCode}`
+        if (participantInfo.identity !== expectedAgentId) return
+        
+        const message = await reader.readAll()
+        if (message && typeof message === 'string') {
+          setCaptions(prev => {
+            const next = [...prev, message]
+            return next.slice(-50) // Keep last 50 captions
+          })
         }
-      } catch {}
-    })
+      } catch (error) {
+        console.warn('Error handling transcription:', error)
+      }
+    }
+    
+    // Register the text stream handler for agent transcriptions
+    r.registerTextStreamHandler('lk.transcription', handleTranscriptions)
 
     return () => {
-      try { r.removeAllListeners() } catch {}
+      try { 
+        // Unregister text stream handler
+        r.unregisterTextStreamHandler('lk.transcription')
+        r.removeAllListeners() 
+      } catch {}
       try { r.disconnect() } catch {}
       // no-op
     }
@@ -85,24 +90,30 @@ export function AttendeeLive(props: AttendeeLiveProps) {
     // Snapshot the current audio element for this effect's lifetime
     const mediaElAtEffect = audioElRef.current
 
-    function tryAttach(pub: RemoteTrackPublication) {
+    function tryAttach(pub: RemoteTrackPublication, participant: RemoteParticipant) {
       if (!selectedLangCode) return
-      const expectedName = `translation-audio-${selectedLangCode}`
-      if (pub?.trackName !== expectedName) return
-      currentAudioPubRef.current = pub
-      if (pub.track && mediaElAtEffect) {
-        const mediaEl = mediaElAtEffect
-        // Attach
-        pub.track.attach(mediaEl)
-        // Respect audio toggle
-        mediaEl.muted = !enableAudio
-        // Best-effort play
-        mediaEl.play().catch(() => { setNeedsUserGesture(true) })
+      
+      // Look for translator agent with matching language (as per agent identity)
+      const expectedAgentId = `translator-${selectedLangCode}`
+      if (participant.identity !== expectedAgentId) return
+      
+      // Subscribe to the agent's audio track (agents publish standard audio tracks)
+      if (pub.kind === Track.Kind.Audio) {
+        currentAudioPubRef.current = pub
+        if (pub.track && mediaElAtEffect) {
+          const mediaEl = mediaElAtEffect
+          // Attach agent's audio track
+          pub.track.attach(mediaEl)
+          // Respect audio toggle
+          mediaEl.muted = !enableAudio
+          // Best-effort play
+          mediaEl.play().catch(() => { setNeedsUserGesture(true) })
+        }
       }
     }
 
-    const onTrackSubscribed = (_track: Track, pub: RemoteTrackPublication) => {
-      tryAttach(pub)
+    const onTrackSubscribed = (track: Track, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+      tryAttach(pub, participant)
     }
 
     const onTrackUnsubscribed = (_track: Track, pub: RemoteTrackPublication) => {
@@ -115,11 +126,9 @@ export function AttendeeLive(props: AttendeeLiveProps) {
     }
 
     // Try existing publications first
-    for (const p of r.remoteParticipants.values()) {
-      for (const pub of p.trackPublications.values()) {
-        if (pub.kind === Track.Kind.Audio) {
-          tryAttach(pub)
-        }
+    for (const participant of r.remoteParticipants.values()) {
+      for (const pub of participant.trackPublications.values()) {
+        tryAttach(pub, participant)
       }
     }
 

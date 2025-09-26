@@ -1,26 +1,31 @@
 # LiveKit Translation Agent for Events
 
-A real-time translation agent that joins event rooms and provides live translations using OpenAI's Realtime API.
+A simple real-time translation agent using Google STT + OpenAI LLM Translation + Google TTS pipeline. **One agent per language pair** for maximum simplicity and reliability.
 
 ## 🎯 How It Works
 
-1. **Admin creates event** with language settings (room NOT created yet)
-2. **Admin starts event** → Creates LiveKit room
-3. **Agent automatically joins** and fetches config from app API
-4. **Agent translates** admin speech to configured target languages
-5. **Attendees receive** translated audio and captions in their selected language
-6. **Admin ends event** → Room closed, agent automatically leaves
+1. **Admin starts event** → Creates LiveKit room
+2. **Translation agent joins** (configured for specific target language)
+3. **Agent listens** to English speech via Google STT
+4. **Agent translates** text using OpenAI LLM with translation instructions
+5. **Agent speaks** translation via Google TTS
+6. **Attendees receive** translated audio via standard agent audio track
+7. **Multiple agents** can run simultaneously for multiple target languages
 
 ## 🏗️ Architecture
 
 ```
-Admin → Event Room → Translation Agent → Translated Audio/Text → Attendees
-                    ↓                    
-                  API Call              
-                    ↓                    
-              Event Config             
-           (from database)
+Admin → LiveKit Room → Translation Agent → Translated Audio → Attendees
+        (English)      ↓   ↓   ↓         (Target Language)
+                    Google  LLM  Google
+                     STT  Translate TTS
 ```
+
+**Pipeline:**
+1. **Google STT** converts English speech to text
+2. **OpenAI LLM** translates text to target language via instructions  
+3. **Google TTS** synthesizes target language speech
+4. **LiveKit** streams translated audio to attendees
 
 ## 📋 Event Configuration
 
@@ -57,19 +62,48 @@ Returns:
 1. **LiveKit Cloud Account** - Sign up at https://cloud.livekit.io
 2. **OpenAI API Key** - Get from https://platform.openai.com
 3. **LiveKit CLI** - Install via `brew install livekit-cli` or download
+4. **Google Cloud Service Account** - Place credentials file in agent folder
+
+### Google Cloud Credentials Setup
+
+The agent automatically loads Google Cloud credentials from a local file:
+
+1. **Download** your service account JSON from Google Cloud Console
+2. **Rename** it to: `Google cloud credentials json` (no .json extension)
+3. **Place** it in the `livekit-agent/` folder
+4. **Done!** The agent will automatically find and use it
+
+```
+livekit-agent/
+├── agent.py
+├── requirements.txt
+└── Google cloud credentials json  ← Place your credentials here
+```
 
 ### Environment Variables
 
 Create a `.env` file:
 
 ```bash
-# Required
+# Required - Target language for this agent instance
+TARGET_LANGUAGE=es-ES  # Examples: es-ES, fr-FR, de-DE, it-IT, etc.
+
+# Optional - Specific voice for target language  
+TARGET_VOICE=es-ES-Standard-A  # See Google Cloud TTS docs for available voices
+
+# Google Cloud credentials are loaded automatically from:
+# 'Google cloud credentials json' file in livekit-agent folder
+# No environment variable needed - file is detected automatically
+
+# Required - OpenAI API for LLM translation
 OPENAI_API_KEY=your_openai_api_key
+
+# Required - LiveKit Connection
 LIVEKIT_API_KEY=your_livekit_api_key
 LIVEKIT_API_SECRET=your_livekit_secret
 LIVEKIT_URL=wss://your-project.livekit.cloud
 
-# Required - Your app URL for fetching event config
+# Optional - App URL for event validation
 APP_URL=https://your-app.vercel.app
 ```
 
@@ -88,55 +122,67 @@ python agent.py dev
 
 ### Deploy to LiveKit Cloud
 
+Deploy one agent per target language:
+
 ```bash
 # Authenticate with LiveKit Cloud
 lk cloud auth
 
-# Deploy the agent
-lk agent deploy
+# Deploy Spanish translator (Google credentials loaded from local file)
+TARGET_LANGUAGE=es-ES TARGET_VOICE=es-ES-Standard-A lk agent deploy --name spanish-translator
+
+# Deploy French translator  
+TARGET_LANGUAGE=fr-FR TARGET_VOICE=fr-FR-Standard-A lk agent deploy --name french-translator
+
+# Deploy German translator
+TARGET_LANGUAGE=de-DE TARGET_VOICE=de-DE-Standard-A lk agent deploy --name german-translator
 
 # Check deployment status
 lk agent status
 
-# View logs
-lk agent logs
+# View logs for specific agent
+lk agent logs spanish-translator
 ```
 
 ## 📡 Published Tracks
 
-The agent publishes translation tracks with specific naming conventions:
+Each agent publishes **standard LiveKit agent tracks**:
 
-- **Audio**: `translation-audio-{lang}` (e.g., `translation-audio-es-ES`)
-- **Text**: `translation-text-{lang}` data messages
+- **Audio Track**: Standard agent audio track (no custom naming)
+- **Agent Identity**: `translator-{lang}` (e.g., `translator-es-ES`)
+- **Transcriptions**: Available via `lk.transcription` text stream
 
 ## 🔧 Configuration
 
 ### Supported Languages
 
-The agent maps language codes to OpenAI language names:
+The agent supports all languages available in Google Cloud services:
 
-- `es-ES` → Spanish
-- `fr-FR` → French
+**Popular Languages:**
+- `es-ES` → Spanish (Spain)
+- `fr-FR` → French (France) 
 - `de-DE` → German
 - `it-IT` → Italian
 - `pt-PT` → Portuguese
-- `pt-BR` → Brazilian Portuguese
-- `zh-CN` → Mandarin Chinese
+- `pt-BR` → Portuguese (Brazil)
+- `zh-CN` → Chinese (Mandarin)
 - `ja-JP` → Japanese
 - `ko-KR` → Korean
 - `ru-RU` → Russian
 - `ar-SA` → Arabic
 - `hi-IN` → Hindi
 
+See [Google Cloud TTS Languages](https://cloud.google.com/text-to-speech/docs/voices) for complete list.
+
 ### Voice Options
 
-Available OpenAI voices:
-- `alloy` (default)
-- `echo`
-- `fable`
-- `onyx`
-- `nova`
-- `shimmer`
+Use Google Cloud TTS voice names in `TARGET_VOICE`:
+- `es-ES-Standard-A` (Spanish female)
+- `fr-FR-Standard-A` (French female)
+- `de-DE-Standard-A` (German female)
+- Or leave empty for default voice
+
+See [Google Cloud TTS Voices](https://cloud.google.com/text-to-speech/docs/voices) for all available voices.
 
 ## 🐛 Troubleshooting
 
@@ -198,12 +244,32 @@ lk agent deploy
 lk agent status
 ```
 
+## 🚀 Quick Start (MVP)
+
+To get started, deploy just a **Spanish translator** for testing:
+
+```bash
+# Prerequisites:
+# 1. Place 'Google cloud credentials json' file in livekit-agent folder ✅
+# 2. Set your OpenAI API key in environment
+export OPENAI_API_KEY=sk-your-key
+
+# Deploy Spanish translator
+TARGET_LANGUAGE=es-ES TARGET_VOICE=es-ES-Standard-A lk agent deploy --name spanish-translator
+
+# Test: Admin speaks English → Agent outputs Spanish
+```
+
+**Google credentials are automatically loaded from the local file - no environment variables needed!**
+
+Once working, add more languages by deploying additional agents with different `TARGET_LANGUAGE` values.
+
 ## 🚨 Important Notes
 
-1. **One language per agent instance** - Currently handles primary target language only
-2. **Room metadata required** - Agent will exit if no valid metadata found
-3. **Auto-dispatch** - Agent automatically joins when event room is created
-4. **Persistent connection** - Agent stays connected until event ends
+1. **One language per agent instance** - Maximum simplicity and reliability
+2. **Standard LiveKit patterns** - Uses agent audio tracks, not custom naming
+3. **Google Cloud required** - Needs valid Google authentication
+4. **Environment driven** - All configuration via environment variables
 
 ## 📝 Future Enhancements
 
